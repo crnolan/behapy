@@ -7,5 +7,6 @@ Execute the following from the project folder in a shell with conda on the path:
 
 ```bash
 conda env create -f environment.yaml
+conda activate behapy
 pip install -e .
 ```
