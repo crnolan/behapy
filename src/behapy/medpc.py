@@ -1,5 +1,6 @@
 """Convert the bizarre MedPC output to a sane raw data structure
 """
+import warnings
 from collections import namedtuple
 from typing import Tuple, Union, Any
 from datetime import datetime
@@ -22,12 +23,13 @@ def experiment_info(variables: dict[str, str]) -> pd.Series:
     start = datetime.strptime(startstr, '%m/%d/%y %H:%M:%S')
     end = datetime.strptime(endstr, '%m/%d/%y %H:%M:%S')
     return pd.Series({
-        'Subject': variables['Subject'],
-        'Experiment': variables['Experiment'],
-        'Group': variables['Group'],
-        'Box': variables['Box'],
-        'Start': start,
-        'End': end})
+        'subject': variables['Subject'],
+        'experiment': variables['Experiment'],
+        'group': variables['Group'],
+        'box': variables['Box'],
+        'start': start,
+        'end': end,
+        'MSN': variables['MSN']})
 
 
 def get_events(timestamps: list[str],
@@ -47,6 +49,14 @@ def get_events(timestamps: list[str],
     """
     ts_prev = 0.0
     event_list = []
+    valid_events = False
+    for ts in timestamps:
+        if float(ts) > 0.:
+            valid_events = True
+            break
+    if not valid_events:
+        warnings.warn('No valid events in list')
+        return pd.DataFrame({'timestamp': [], 'event': []})
     for ts, event in zip(timestamps, event_idxs):
         if float(ts) - ts_prev < 0:
             break
@@ -58,7 +68,7 @@ def get_events(timestamps: list[str],
                                int(float(event))))
         ts_prev = float(ts)
     return pd.DataFrame(event_list,
-                        columns=['Timestamp', 'Event'])
+                        columns=['timestamp', 'event'])
 
     
 def parse_line(line: str, prev_token: str, prev_data: Any) -> Tuple[str, str]:
