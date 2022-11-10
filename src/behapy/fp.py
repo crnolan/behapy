@@ -29,7 +29,7 @@ def smooth(x, fs):
     try:
         b = smooth.filter_b
     except AttributeError:
-        b = sig.firwin2(int(fs*8), freq=[0, 0.1, 0.2, fs/2],
+        b = sig.firwin2(int(fs*8), freq=[0, 0.01, 0.05, fs/2],
                         gain=[1.0, 1.0, 0.0001, 0.0], fs=fs)
         smooth.filter_b = b
     xds = sig.decimate(x, 10, ftype='fir', zero_phase=True)
@@ -41,8 +41,10 @@ def detrend_hp(x, fs):
     try:
         b = detrend_hp.filter_b
     except AttributeError:
-        b = sig.firwin2(int(fs*8), freq=[0, 0.1, 0.2, 0.4, fs/2],
-                        gain=[0., 1e-7, 0.1, 1., 1.], fs=fs)
+        # b = sig.firwin2(int(fs*8), freq=[0, 0.1, 0.2, 0.4, fs/2],
+        #                 gain=[0., 1e-7, 0.1, 1., 1.], fs=fs)
+        b = sig.firwin2(1001, freq=[0, 0.05, 0.1, fs/2],
+                        gain=[0., 0.001, 1., 1.], fs=fs)
         detrend_hp.filter_b = b
     return sig.filtfilt(b, 1, x)
 
@@ -110,7 +112,8 @@ def epoch_events(data: Iterable[float],
     ts = np.arange(n) / fs + tstart
     ixs = np.searchsorted(ts, events)
     window_ix = np.ceil(np.array(window) * fs).astype(int)
-    baseline_ix = np.ceil(np.array(baseline_window) * fs).astype(int)
+    if method != 'nobase':
+        baseline_ix = np.ceil(np.array(baseline_window) * fs).astype(int)
     dslice = lambda b, w: data[slice(*(b + w))]
     if method == 'z':
         z = lambda d, b: (d - np.mean(b)) / np.std(b)
