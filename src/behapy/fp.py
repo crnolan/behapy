@@ -64,9 +64,11 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
         df = detrend_hp(df, fs)
         
     if method == 'fit':
-        return df / signal_fit
+        dff = df / signal_fit
+        return dff / dff.std()
     elif method == 'const':
-        return df / np.mean(signal)
+        dff = df / np.mean(signal)
+        return dff / dff.std()
     elif method == 'df':
         return df
     elif method == 'yfit':
