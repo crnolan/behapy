@@ -62,8 +62,8 @@ def record_reject(boundsx, x, y):
         reject_intervals.merge_overlaps()
     return reject_overlay(reject_intervals)
 
-trace_shade = datashade(hv.Curve((df.index, df)), aggregator=ds.count()).redim(
-    x='time', y=hv.Dimension('F')).opts(width=800, tools=['xbox_select, tap'])
+trace_shade = datashade(hv.Curve((df.index, df)), 
+    aggregator=ds.count()).redim(x='time', y=hv.Dimension('F')).opts(width=800, tools=['xbox_select, tap'])
 
 reject_stream = streams.BoundsX(source=trace_shade, boundsx=None, transient=True)
 select_stream = streams.DoubleTap(source=trace_shade, x=None, y=None, transient=True)

@@ -3,8 +3,6 @@ import numpy as np
 import scipy.signal as sig
 from collections import namedtuple
 from typing import Iterable
-
-
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
 
 
