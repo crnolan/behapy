@@ -1,9 +1,12 @@
 # %%
 
-import tdt
 import os
+import sys
 import numpy as np
 import pandas as pd
+import tdt
+
+sys.path.insert(0,'../src/behapy')
 
 # %%
 from config import getParameters
