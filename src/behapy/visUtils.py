@@ -16,6 +16,8 @@ import holoviews.streams as streams
 from holoviews import opts
 from holoviews.operation.datashader import datashade, dynspread, rasterize
 hv.extension('bokeh')
+import panel
+panel.extension(comms='vscode')
 
 import datashader as ds
 import panel
@@ -41,6 +43,53 @@ def get_masked_regions(ts, mask):
 def plot_regions(onsets, offsets):
     return hv.Overlay([hv.VSpan(t0, t1) for t0, t1 in zip(onsets, offsets)])
 
+def maskToInterval(mask):
+    started = False
+    sstart=[]
+    sstop = []
+    for s in range(0,len(mask)):
+        if (mask[s]==True) and (started==False):
+            sstart.append(np.where(mask[s]))
+            started=True
+        if (mask[s]==False) and (started==True):
+            sstop.append(np.where(mask[s]))
+            started=False
+
+    #TODO: turn interval starts and stops into an intervaltree
+    return interval
+
+def getAutoBads(df):
+    bounds=None
+
+    #find near-zero values (fibre disconnections)
+    window=np.round(len(df)*.01)
+    mask = np.array(np.zeros((df.shape)),dtype="bool")
+    for s in range(0,len(df)-window):
+        x = df[s*window:s*window+window]
+        if np.median(x)<np.std(df): #if this window is within 1 std of zero
+            mask[s+np.round(window*.5)] = True #mask its central value
+    #TODO: account for start and end of trace samples that may be bad
+
+    # find jumps
+    jumps = np.where(np.abs(np.diff(df))>np.std(np.diff(df))*5)
+    print(jumps)
+    print(np.shape(jumps))
+
+    #mask jump samples
+    for j in range(0,len(jumps)):
+        print(jumps[j])
+        mask[jumps[j]]==True
+
+    #create intervals from mask
+
+
+    return bounds
+
+def getAutoShifts(df):
+    bounds = None
+    # TODO: has the baseline shifted? if yes, we *might* want to fit the isosbestic trace in two separate regressions
+    return bounds
+
 def reject_overlay(intervals, selected=[]):
     if intervals is None or intervals == []:
         return hv.Overlay([])
@@ -49,23 +98,34 @@ def reject_overlay(intervals, selected=[]):
                        for interval, c in zip(intervals, colors)])
 
 def record_reject(boundsx, x, y):
+
     if None not in [x, y]:
         reject_intervals.remove_overlap(x)
+
     if boundsx is not None and None not in boundsx:
         reject_intervals.add(Interval(*boundsx))
         reject_intervals.merge_overlaps()
+
     return reject_overlay(reject_intervals)
 
 # interactive plot for artefact rejection
-def visRawInteractive(df):
-    return datashade(hv.Curve((df.index, df)), aggregator=ds.count()).redim(
+def visRawInteractive(df,detectBads,detectShifts):
+
+    trace_shade = datashade(hv.Curve((df.index, df)), aggregator=ds.count()).redim(
     x='time', y=hv.Dimension('F')).opts(width=800, tools=['xbox_select, tap'])
 
-def getMask(trace_shade):
-    reject_stream = streams.BoundsX(source=trace_shade, boundsx=None, transient=True)
+    bounds=None
+    if detectBads:
+        bounds = getAutoBads(df) #auto-detect jumps in data
+    if detectShifts:
+        bounds = getAutoShifts(df) #auto-detect baseline shifts
+    reject_stream = streams.BoundsX(source=trace_shade, boundsx=bounds,transient=True) #plot those data segments
+
     select_stream = streams.DoubleTap(source=trace_shade, x=None, y=None, transient=True)
     reject_dmap = hv.DynamicMap(record_reject, streams=[reject_stream, select_stream])
-    (trace_shade * reject_dmap).opts(height=300, responsive=True)
+    
+    return (trace_shade * reject_dmap).opts(height=300, responsive=True) #combine trace and dynamic map into one figure, and return it
+
 
 def treeToList(tree,max):
     mylist=[]
@@ -73,15 +133,15 @@ def treeToList(tree,max):
         mylist.append(list(i[0:max]))
     return mylist
 
-def rejectedToMask(rejected,ts):
+def intervalToMask(interval,ts):
 
     mask = np.array(np.zeros((ts.shape)),dtype="bool")
-    if np.any(rejected):
-        if len(np.shape(rejected))==1:
-            rejected=[rejected]
-        for i in range(0,np.shape(rejected)[0]):
-            min = np.where(ts>rejected[i][0])[0][0]
-            max = np.where(ts<rejected[i][1])[0][-1]
+    if np.any(interval):
+        if len(np.shape(interval))==1:
+            interval=[interval]
+        for i in range(0,np.shape(interval)[0]):
+            min = np.where(ts>interval[i][0])[0][0]
+            max = np.where(ts<interval[i][1])[0][-1]
             mask[range(min,max)]=True
 
     return mask
