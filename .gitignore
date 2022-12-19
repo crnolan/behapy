@@ -128,5 +128,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-#documents for personal reference
-doc
+# ljb additions:
+.DS_Store
+.vscode/
+doc_ljb/
