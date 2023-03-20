@@ -8,7 +8,7 @@ from string import ascii_uppercase
 import pandas as pd
 
 
-def experiment_info(variables: dict[str, str]) -> pd.Series:
+def experiment_info(variables: "dict[str, str]") -> pd.Series:
     """Parse the experiment infomation from variables.
     
     Args:
@@ -32,9 +32,9 @@ def experiment_info(variables: dict[str, str]) -> pd.Series:
         'MSN': variables['MSN']})
 
 
-def get_events(timestamps: list[str],
-               event_idxs: list[str],
-               event_map: dict[int, str] = None) -> pd.DataFrame:
+def get_events(timestamps: "list[str]",
+               event_idxs: "list[str]",
+               event_map: "dict[int, str]" = None) -> pd.DataFrame:
     """Parse string-encoded timestamps and events.
     
     Args:

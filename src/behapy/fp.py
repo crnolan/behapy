@@ -1,11 +1,50 @@
 from typing import Tuple, Iterable
+from pathlib import Path
+import json
+import logging
 import numpy as np
 import scipy.signal as sig
 from collections import namedtuple
 from typing import Iterable
+import pandas as pd
+import statsmodels.api as sm
+from .pathutils import fibre_path, events_path
 
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
+
+
+def load_channel(base, subject, session, task, run, label, channel):
+    data_fn = fibre_path(base, subject, session, task, run, label, channel, '.npy')
+    meta_fn = fibre_path(base, subject, session, task, run, label, channel, '.json')
+    with open(meta_fn) as file:
+        meta = json.load(file)
+    data = np.load(data_fn)
+    return data, meta
+    
+
+def load_fibre_session(base, subject, session, task, run, label, fibre):
+    load_channel(base, subject, session, task, run, label, )
+    ses_path = base / 'sub-{sub:02d}/ses-{ses:02d}'.format(sub=subject, ses=session)
+    fp_template = 'fp/sub-{sub:02d}_ses-{ses:02d}_task-{task}-{task_id:02d}_{ch}.{ext}'
+    series = []
+    channels = ['405', '465']
+    fs = -1.
+    for ch in channels:
+        meta_fn = fp_template.format(sub=subject, ses=session, task=task,
+                                     task_id=task_id, ch=ch, ext='json')
+        data_fn = fp_template.format(sub=subject, ses=session, task=task,
+                                     task_id=task_id, ch=ch, ext='npy')
+        with open(ses_path/meta_fn) as file:
+            meta = json.load(file)
+        data = np.load(ses_path/data_fn)
+        if (fs > 0) and (meta['fs'] != fs):
+            logging.warning('Channels have different frequencies')
+        fs = meta['fs']
+        ts = np.arange(data.shape[0]) / fs
+        series.append(pd.Series(data, index=ts))
+    return (pd.concat(series, axis=0, keys=channels, names=['channel', 'time']),
+            fs)
 
 
 def map_events(events: Iterable[Event]):

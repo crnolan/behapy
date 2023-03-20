@@ -5,4 +5,7 @@ dependencies:
   - pandas
   - matplotlib
   - seaborn
+  - intervaltree
+  - holoviews
+  - datashader
 

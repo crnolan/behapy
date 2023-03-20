@@ -6,7 +6,7 @@ import scipy.signal as sig
 from tdt import read_block
 import json
 from collections import defaultdict
-
+from .pathutils import fibre_path, events_path
 
 def load_session_tank_map(filename: str) -> pd.DataFrame:
     """Loads a file mapping sessions to the tank files.
@@ -21,8 +21,9 @@ def load_session_tank_map(filename: str) -> pd.DataFrame:
         'task': str,
         'run': str,
         'type': str,
+        'tdt_id': str,
         'channel': str,
-        'tdt_id': str
+        'label': str
     }
     info = pd.read_csv(filename, dtype=dtypes)
     resolved_path = Path(filename).resolve().parent
@@ -41,23 +42,17 @@ def get_epoch_df(epoch):
 
 def convert_stream(df, block, out_path):
     info_msg = ('Creating raw data for subject {}, session {}, task {}, '
-                'run {}, channel {} from block {}, stream {}')
+                'run {}, channel {}, label {} from block {}, stream {}')
     info_msg = info_msg.format(df.subject, df.session, df.task, df.run,
-                               df.channel, df.block, df.tdt_id)
+                               df.channel, df.label, df.block, df.tdt_id)
     logging.info(info_msg)
     out_path = Path(out_path)
-    session_root = out_path / 'sub-{}/ses-{}/'.format(
-        df.subject, df.session)
-    fn_fragment = 'sub-{}_ses-{}_task-{}_run-{}'.format(
-        df.subject, df.session, df.task, df.run
-    )
-
-    # Create folders if they don't yet exist
-    (session_root / 'fp').mkdir(parents=True, exist_ok=True)
     if df.type == 'stream':
-        fn_stem = session_root / 'fp' / (fn_fragment + '_' + df.channel)
-        data_fn = str(fn_stem) + '.npy'
-        meta_fn = str(fn_stem) + '.json'
+        data_fn = fibre_path(out_path, df.subject, df.session, df.task, df.run,
+                            df.label, df.channel, '.npy')
+        meta_fn = fibre_path(out_path, df.subject, df.session, df.task, df.run,
+                            df.label, df.channel, '.json')
+        data_fn.parent.mkdir(parents=True, exist_ok=True)
         meta = {
             'fs': block.streams[df.tdt_id].fs,
             'start_time': block.streams[df.tdt_id].start_time,
@@ -66,7 +61,8 @@ def convert_stream(df, block, out_path):
         with open(meta_fn, 'w') as file:
             json.dump(meta, file, indent=4)
     elif df.type == 'epoc':
-        fn = session_root / (fn_fragment + '_' + df.channel + '.csv')
+        fn = events_path(out_path, df.subject, df.session, df.task, df.run)
+        fn.parent.mkdir(parents=True, exist_ok=True)
         events_df = get_epoch_df(block.epocs[df.tdt_id])
         events_df.to_csv(fn, sep=',', na_rep='n/a')
 
