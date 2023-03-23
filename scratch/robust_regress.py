@@ -5,7 +5,7 @@ import numpy as np
 import behapy.fp as fp
 import statsmodels.api as sm
 import scipy.signal as sig
-from sklearn.cluster import OPTICS
+from intervaltree import IntervalTree, Interval
 import holoviews as hv
 from holoviews import opts
 import datashader as ds
@@ -31,34 +31,91 @@ dlight_ds = sig.decimate(dlight, downsample_factor, ftype='fir', zero_phase=True
 ts_ds = ts[::downsample_factor]
 
 # %%
-dlight_df = pd.Series(dlight_ds, index=ts_ds)
-iso_df = pd.Series(iso_ds, index=ts_ds)
+# pad
+n = int(dlight_meta['fs'] / downsample_factor * 5)
+ts_pad = np.concatenate([ts_ds[:n] - (ts_ds[n] - ts_ds[0]),
+                        ts_ds,
+                        ts_ds[-n:] + (ts_ds[-1] - ts_ds[-n-1])])
+iso_pad = np.concatenate([np.repeat(iso_ds[0], n),
+                          iso_ds,
+                          np.repeat(iso_ds[-1], n)])
+dlight_pad = np.concatenate([np.repeat(dlight_ds[0], n),
+                             dlight_ds,
+                             np.repeat(dlight_ds[-1], n)])
+
+# %%
+dlight_df = pd.Series(dlight_pad, index=ts_pad)
+iso_df = pd.Series(iso_pad, index=ts_pad)
 
 # %%
 #
-# Extend timeseries to n length before and after to not lose any initial
-# / ending discontinuities
-n = 100
+std_n = int(dlight_meta['fs'] / downsample_factor * 30)
 iso_rmeans = iso_df.rolling(n).mean()
-iso_rstds = iso_df.rolling(n).std()
+iso_rstds = iso_df.rolling(std_n).std()
 d = iso_rmeans.diff(-n)
-d_thresh = d.abs() > iso_rstds.median()
+d_thresh = d.abs() > iso_rstds.median() * 3
 d_peaks = sig.find_peaks(d.abs(), prominence=iso_rstds.median())[0]
 d_thresh_peaks = d_thresh.iloc[d_peaks]
 d_thresh_peaks[d_thresh_peaks].shape
 d_shade = datashade(hv.Curve((d.index, d)),
                     aggregator=ds.count(), cmap='blue')
-iso_shade = datashade(hv.Curve((ts_ds, iso_ds)),
+iso_shade = datashade(hv.Curve((ts_pad, iso_pad)),
                     aggregator=ds.count(), cmap='blue')
-stds_shade = datashade(hv.Curve((ts_ds, iso_rstds)),
+stds_shade = datashade(hv.Curve((ts_pad, iso_rstds)),
                     aggregator=ds.count(), cmap='blue')
 thresh_lines = hv.Overlay([hv.VLine(t) for t in d_thresh_peaks[d_thresh_peaks].index])
 (d_shade.opts(width=800) + stds_shade.opts(width=800) + iso_shade.opts(width=800) * thresh_lines).cols(1).redim(
     x='time', y=hv.Dimension('F')).opts(height=300)
 
 # %%
-clust = OPTICS(min_samples=50, xi=0.05, min_cluster_size=0.01)
-clust.fit(np.vstack([ts_ds, iso_ds]).T)
+# If the mean of any interval is near zero, mask out the samples in that
+# interval, and for a second after the interval.
+reject_intervals = IntervalTree()
+# time for signal to stabilise after a disconnection (in seconds)
+bounce_buffer = 2.0
+# time to exclude before a disconnection because the disconnection time
+# will be the centre of the drop
+disconnect_buffer = 1.0
+
+disconts = d_thresh_peaks[d_thresh_peaks].index.tolist()
+disconts = [0] + disconts + [ts_ds[-1]]
+for t0, t1 in zip(disconts[:-1], disconts[1:]):
+    if iso_df.loc[t0:t1].mean() < iso_rstds.median() * 5:
+        # If any true signal has a mean smaller than 5 times the median
+        # std, we've got problems.
+        reject_intervals.add(Interval(t0-disconnect_buffer, t1+bounce_buffer))
+
+# %%
+import holoviews.streams as streams
+
+def reject_overlay(intervals, selected=[]):
+    if intervals is None or intervals == []:
+        return hv.Overlay([])
+    colors = ['red' if x in selected else 'pink' for x in range(len(intervals))]
+    return hv.Overlay([hv.VSpan(*(interval[0:2])).opts(color=c)
+                       for interval, c in zip(intervals, colors)])
+
+def record_reject(boundsx, x, y):
+#     if boundsx is None:
+#         return hv.Overlay([])
+    if None not in [x, y]:
+        reject_intervals.remove_overlap(x)
+    if boundsx is not None and None not in boundsx:
+        reject_intervals.add(Interval(*boundsx))
+        reject_intervals.merge_overlaps()
+    return reject_overlay(reject_intervals)
+
+trace_shade = datashade(hv.Curve((iso_df.index, iso_df)), aggregator=ds.count()).redim(
+    x='time', y=hv.Dimension('F')).opts(width=800, tools=['xbox_select, tap'])
+
+reject_stream = streams.BoundsX(source=trace_shade, boundsx=None, transient=True)
+select_stream = streams.DoubleTap(source=trace_shade, x=None, y=None, transient=True)
+reject_dmap = hv.DynamicMap(record_reject, streams=[reject_stream, select_stream])
+(trace_shade * reject_dmap).opts(height=300, responsive=True)
+
+# %%
+# Use rejected intervals to create a mask
+mask = pd.Series(index=ts)
 
 # %%
 rlm_model = sm.RLM(dlight_ds, iso_ds)
