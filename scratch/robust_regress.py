@@ -11,8 +11,8 @@ from holoviews import opts
 import datashader as ds
 from holoviews.operation.datashader import datashade, dynspread, rasterize
 hv.extension('bokeh')
-import panel
-panel.extension(comms='vscode')
+import panel as pn
+pn.extension(comms='vscode')
 
 # %%
 BIDSROOT = Path('..')
@@ -114,27 +114,30 @@ reject_dmap = hv.DynamicMap(record_reject, streams=[reject_stream, select_stream
 (trace_shade * reject_dmap).opts(height=300, responsive=True)
 
 # %%
-# Use rejected intervals to create a mask
-mask = pd.Series(index=ts)
+# Filter out rejected regions
+# mask = pd.Series(False, index=ts)
+filtered = pd.DataFrame(np.vstack([dlight, iso]).T, index=ts, columns=['dlight', 'iso'])
+for i in reject_intervals:
+    filtered.loc[i[0]:i[1]] = pd.NA
+filtered.dropna(inplace=True)
 
 # %%
-rlm_model = sm.RLM(dlight_ds, iso_ds)
+rlm_model = sm.RLM(filtered.dlight, filtered.iso)
 rlm_results = rlm_model.fit()
-rlm_results.params
 # fit_df = pd.Series(rlm_results.fittedvalues, index=ts)
 
 # %%
-dlight_shade = datashade(hv.Curve((ts_ds, dlight_ds)),
+dlight_shade = datashade(hv.Curve((filtered.index, filtered.dlight)),
                          aggregator=ds.count(), cmap='blue')
-iso_shade = datashade(hv.Curve((ts_ds, iso_ds)),
+iso_shade = datashade(hv.Curve((filtered.index, filtered.iso)),
                       aggregator=ds.count(), cmap='red')
-fit_shade = datashade(hv.Curve((ts_ds, rlm_results.fittedvalues)),
+fit_shade = datashade(hv.Curve((filtered.index, rlm_results.fittedvalues)),
                       aggregator=ds.count(), cmap='green')
 (dlight_shade * iso_shade * fit_shade).redim(
     x='time', y=hv.Dimension('F')).opts(width=800, height=300, tools=['xbox_select, tap'])
 
 # %%
-dff_shade = datashade(hv.Curve((ts_ds, (dlight-rlm_results.fittedvalues)/rlm_results.fittedvalues)),
+dff_shade = datashade(hv.Curve((filtered.index, (filtered.dlight-rlm_results.fittedvalues)/rlm_results.fittedvalues)),
                       aggregator=ds.count(), cmap='blue')
 dff_shade.redim(
     x='time', y=hv.Dimension('F')).opts(width=800, height=300, tools=['xbox_select, tap'])
