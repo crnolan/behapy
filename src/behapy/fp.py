@@ -8,44 +8,181 @@ from collections import namedtuple
 from typing import Iterable
 import pandas as pd
 import statsmodels.api as sm
-from .pathutils import fibre_path, events_path
+from intervaltree import IntervalTree, Interval
+from numpy.lib.stride_tricks import sliding_window_view
+from .pathutils import get_fibre_path, get_events_path, get_recordings
 
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
 
 
+def SessionMeta():
+
+    def __init__(self, sub, ses, task, run, label, channel, 
+                 fs=None, start_time=None):
+        self.sub = sub
+        self.ses = ses
+        self.task = task
+        self.label = label
+        self.channel = channel
+        self.meta = {
+            'fs': fs,
+            'start_time': start_time,
+        }
+
+    def from_json(filename):
+        session_meta = SessionMeta()
+        with open(filename) as file:
+            session_meta.meta = json.load(file)
+        return session_meta
+    
+    def to_json():
+        pass
+
+
+class SessionSite():
+
+    def __init__(self):
+        self.subject = None
+        self.session = None
+        self.task = None
+        self.runs = []
+        self.label = None
+        self.channels = []
+        self.iso_index = None
+        self.ts = None
+        self.data = None
+        self.mask_intervals = []
+        self.fs = None
+
+    def iso(self):
+        if self.iso_index is None:
+            raise ValueError('Isosbestic channel not defined')
+        return self.data[self.iso_index]
+
+    def get_downsampled(self, factor=None):
+        if factor is None:
+            # Downsample to something reasonable
+            factor = 1
+            while self.fs / factor > 20:
+                factor *= 2
+        data_ds = sig.decimate(self._rawdata, factor, ftype='fir', zero_phase=True,
+                               axis=0)
+        ds = self.copy()
+        ds.fs = self.fs / factor
+        ds.ts = self.ts[::factor]
+        ds.data = data_ds
+        return ds
+    
+    def load(root, subject, session, label, iso_channel):
+        root = Path(root)
+        recordings = pd.DataFrame(get_recordings(root / 'rawdata',
+                                                 subject, session, label))
+        subjects = recordings.loc[:, 'subject'].unique()
+        sessions = recordings.loc[:, 'session'].unique()
+        tasks = recordings.loc[:, 'task'].unique()
+        runs = recordings.loc[:, 'run'].unique()
+        labels = recordings.loc[:, 'label'].unique()
+        channels = recordings.loc[:, 'channel'].unique()
+        if any([item.shape[0] != 1
+                for item in [subjects, sessions, tasks, labels]]):
+            msg = ('Multiple session names found for session'
+                   ' with subject {}, session {} and label {}')
+            msg = msg.format(subject, session, label)
+            logging.error(msg)
+            raise ValueError(msg)
+        if (runs.unique().shape[0] != 1):
+            msg = ('Multiple runs not yet implemented (subject {}, session {}'
+                   ' and label {})').format(subject, session, label)
+            raise NotImplementedError(msg)
+
+        # Load all channels
+        data = []
+        t0 = None
+        fs = None
+        for r in recordings.itertuples():
+            d, meta = load_channel(base=root/'rawdata',
+                                   subject=r.subject,
+                                   session=r.session,
+                                   task=r.task,
+                                   run=r.run,
+                                   label=r.label,
+                                   channel=r.channel)
+            if fs is None:
+                fs = meta['fs']
+            if t0 is None:
+                t0 = meta['start_time']
+            if (fs != meta['fs']) or (t0 != meta['start_time']):
+                msg = ('Unequal sample frequencies and/or start times'
+                       ' for subject {}, session {} and label {}')
+                msg.format(subject, session, label)
+                raise ValueError(msg)
+            data.append(d)
+
+        sl = SessionSite()
+        sl.subject = subject
+        sl.session = session
+        sl.label = label
+        sl.task = tasks[0]
+        sl.runs = runs
+        sl.channels = channels
+        sl.ts = np.arange(data[0].shape[0]) / fs + t0
+        sl.data = np.vstack(data).T
+        sl.fs = fs
+        return sl
+
+
 def load_channel(base, subject, session, task, run, label, channel):
-    data_fn = fibre_path(base, subject, session, task, run, label, channel, '.npy')
-    meta_fn = fibre_path(base, subject, session, task, run, label, channel, '.json')
+    data_fn = get_fibre_path(base, subject, session, task, run, label, channel,
+                             'npy')
+    meta_fn = get_fibre_path(base, subject, session, task, run, label, channel,
+                             'json')
     with open(meta_fn) as file:
         meta = json.load(file)
     data = np.load(data_fn)
     return data, meta
-    
 
-def load_fibre_session(base, subject, session, task, run, label, fibre):
-    load_channel(base, subject, session, task, run, label, )
-    ses_path = base / 'sub-{sub:02d}/ses-{ses:02d}'.format(sub=subject, ses=session)
-    fp_template = 'fp/sub-{sub:02d}_ses-{ses:02d}_task-{task}-{task_id:02d}_{ch}.{ext}'
-    series = []
-    channels = ['405', '465']
-    fs = -1.
-    for ch in channels:
-        meta_fn = fp_template.format(sub=subject, ses=session, task=task,
-                                     task_id=task_id, ch=ch, ext='json')
-        data_fn = fp_template.format(sub=subject, ses=session, task=task,
-                                     task_id=task_id, ch=ch, ext='npy')
-        with open(ses_path/meta_fn) as file:
-            meta = json.load(file)
-        data = np.load(ses_path/data_fn)
-        if (fs > 0) and (meta['fs'] != fs):
-            logging.warning('Channels have different frequencies')
-        fs = meta['fs']
-        ts = np.arange(data.shape[0]) / fs
-        series.append(pd.Series(data, index=ts))
-    return (pd.concat(series, axis=0, keys=channels, names=['channel', 'time']),
-            fs)
 
+def load_channels(base, subject, session, task, run, label, channels,
+                  downsample=None):
+    fs = None
+    t0 = None
+    data = []
+    for channel in channels:
+        d, meta = load_channel(base, subject, session, task, run, label,
+                               channel)
+        if fs is None:
+            fs = meta['fs']
+        if t0 is None:
+            t0 = meta['start_time']
+        if (fs != meta['fs']) or (t0 != meta['start_time']):
+            raise ValueError('Unequal sample frequencies and/or start times.')
+        data.append(d)
+    ts = np.arange(data[0].shape[0]) / fs + t0
+    sdata = np.vstack(data).T
+    if downsample is None:
+        return sdata, ts
+    else:
+        ds = sig.decimate(sdata, downsample, ftype='fir', zero_phase=True,
+                          axis=0)
+        return ds, ts[::downsample]
+
+
+def find_disconnects(site, mean_window=5, std_window=30, std_thresh=3):
+    # How many samples to consider for the sliding mean
+    n = int(site.fs * mean_window)
+    # Assume that the STD of the iso channel is constant. We can
+    # then use the median of a sliding window STD as our
+    # characteristic STD.
+    std_n = int(site.fs * std_window)
+    thresh = np.median(np.std(sliding_window_view(site.iso(), std_n), axis=-1))
+    thresh *= std_thresh
+    # 
+    iso = np.mean(sliding_window_view(np.pad(site.iso(), n, 'edge')), axis=-1)
+    d = np.diff(iso, -n)
+    d_thresh = d.abs() > std_thresh
+    d_peaks = sig.find_peaks(d.abs(), prominence=iso_rstds.median())[0]
+    d_thresh_peaks = d_thresh.iloc[d_peaks]
 
 def map_events(events: Iterable[Event]):
     """ Create a dict mapping event codes to the respective events. """

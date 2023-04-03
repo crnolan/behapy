@@ -6,7 +6,7 @@ import scipy.signal as sig
 from tdt import read_block
 import json
 from collections import defaultdict
-from .pathutils import fibre_path, events_path
+from .pathutils import get_fibre_path, get_events_path
 
 def load_session_tank_map(filename: str) -> pd.DataFrame:
     """Loads a file mapping sessions to the tank files.
@@ -48,10 +48,10 @@ def convert_stream(df, block, out_path):
     logging.info(info_msg)
     out_path = Path(out_path)
     if df.type == 'stream':
-        data_fn = fibre_path(out_path, df.subject, df.session, df.task, df.run,
-                            df.label, df.channel, '.npy')
-        meta_fn = fibre_path(out_path, df.subject, df.session, df.task, df.run,
-                            df.label, df.channel, '.json')
+        data_fn = get_fibre_path(out_path, df.subject, df.session, df.task, df.run,
+                            df.label, df.channel, 'npy')
+        meta_fn = get_fibre_path(out_path, df.subject, df.session, df.task, df.run,
+                            df.label, df.channel, 'json')
         data_fn.parent.mkdir(parents=True, exist_ok=True)
         meta = {
             'fs': block.streams[df.tdt_id].fs,
@@ -61,7 +61,7 @@ def convert_stream(df, block, out_path):
         with open(meta_fn, 'w') as file:
             json.dump(meta, file, indent=4)
     elif df.type == 'epoc':
-        fn = events_path(out_path, df.subject, df.session, df.task, df.run)
+        fn = get_events_path(out_path, df.subject, df.session, df.task, df.run)
         fn.parent.mkdir(parents=True, exist_ok=True)
         events_df = get_epoch_df(block.epocs[df.tdt_id])
         events_df.to_csv(fn, sep=',', na_rep='n/a')

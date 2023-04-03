@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import behapy.fp as fp
+from behapy.pathutils import get_recordings, get_session_meta_path
 import statsmodels.api as sm
 import scipy.signal as sig
 from intervaltree import IntervalTree, Interval
@@ -12,7 +13,70 @@ import datashader as ds
 from holoviews.operation.datashader import datashade, dynspread, rasterize
 hv.extension('bokeh')
 import panel as pn
-pn.extension(comms='vscode')
+import param
+from bokeh.models import ColumnDataSource
+from bokeh.plotting import figure
+pn.extension('tabulator', comms='vscode')
+# pn.extension('tabulator')
+
+# %%
+BIDSROOT = Path('/scratch/cnolan/TB006')
+RAWROOT = BIDSROOT / 'rawdata'
+ANALROOT = BIDSROOT / 'derivatives/ds64'
+
+# %%
+recordings = pd.DataFrame(get_recordings(RAWROOT))
+runs = recordings.loc[:, ['sub', 'ses', 'task', 'run', 'label']].drop_duplicates()
+index_cols = ['sub', 'ses', 'task', 'run', 'label']
+downsample_factor = 64
+session_meta_path = get_session_meta_path(ANALROOT)
+if session_meta_path.exists():
+    session_meta = pd.read_csv(session_meta_path, index_col=index_cols)
+else:
+    session_meta = pd.DataFrame(index=pd.MultiIndex([], names=index_cols),
+                                columns=[''])
+    runs.join(session_meta_path, index_cols)
+
+# %%
+class Dashboard(param.Parameterized):
+    selected_index = param.Integer(default=None, allow_None=True)
+    metadata_table = pn.widgets.Tabulator(runs, selection=[0], width=600)
+    
+    @param.depends("selected_index", watch=True)
+    def update_figure(self):
+        if self.selected_index is not None:
+            selected_data = runs.iloc[self.selected_index]
+        else:
+            selected_data = runs.iloc[0]
+        
+        source = ColumnDataSource(data=dict(x=[selected_data["sub"]],
+                                            y=[selected_data["ses"]]))
+        plot = figure(title="Selected Row Data",
+                      x_axis_label="Subject ID",
+                      y_axis_label="Session ID",
+                      width=600,
+                      height=300)
+        plot.circle(x="x", y="y", source=source, size=20, color="navy", alpha=0.5)
+        return plot
+
+    @param.depends("metadata_table.selection", watch=True)
+    def _update_selected_index(self):
+        if self.metadata_table.selection:
+            self.selected_index = self.metadata_table.selection[0]
+        else:
+            self.selected_index = None
+
+    def view(self):
+        return pn.Column(self.metadata_table, self.update_figure)
+
+dashboard = Dashboard()
+pn.serve(dashboard.view(), port=8080)
+
+
+# %%
+for run in runs.loc[runs.task.isin(['FI15', 'RR5', 'RR10'])]:
+    fp.load_channel(RAWROOT, run.sub, run.ses, run.task, run.run, run.label,
+                    'dLight', downsample=downsample_factor)
 
 # %%
 BIDSROOT = Path('..')
