@@ -30,17 +30,16 @@ def get_fibre_segments_path(base, sub, ses, task, run, label):
                                   label=label)
 
 
-def get_recordings(base, subject='*', session='*'):
+def get_recordings(base, subject='*', session='*', label='*'):
     Recording = namedtuple("Recording", ["subject", "session", "task", "run", "label", "channel", "file_path"])
 
     # Set the pattern for the data files
     base = Path(base)
     pattern = ('sub-{subject}/ses-{session}/fp/'
-               'sub-{subject}_ses-{session}_task-*_run-*_label-*_channel-*.npy')
-    pattern = pattern.format(subject=subject, session=session)
+               'sub-{subject}_ses-{session}_task-*_run-*_label-{label}_channel-*.npy')
+    pattern = pattern.format(subject=subject, session=session, label=label)
     # Search for files that match the pattern
     data_files = list(base.glob(str(pattern)))
-    
     # Regex pattern to extract variables from the file names
     regex_pattern = r"sub-([^_]+)_ses-([^_]+)_task-([^_]+)_run-([^_]+)_label-([^_]+)_channel-([^_]+)\.npy"
 
@@ -49,8 +48,8 @@ def get_recordings(base, subject='*', session='*'):
     for file_path in data_files:
         match = re.search(regex_pattern, str(file_path.name))
         if match:
-            sub, ses, task, run, label, channel = match.groups()
-            data_file = Recording(sub, ses, task, run, label, channel, file_path)
+            sub, ses, task, run, lab, channel = match.groups()
+            data_file = Recording(sub, ses, task, run, lab, channel, file_path)
             extracted_data.append(data_file)
 
     return extracted_data

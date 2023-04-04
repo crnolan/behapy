@@ -10,6 +10,7 @@ import pandas as pd
 import statsmodels.api as sm
 from intervaltree import IntervalTree, Interval
 from numpy.lib.stride_tricks import sliding_window_view
+import bottleneck as bn
 from .pathutils import get_fibre_path, get_events_path, get_recordings
 
 
@@ -58,7 +59,7 @@ class SessionSite():
     def iso(self):
         if self.iso_index is None:
             raise ValueError('Isosbestic channel not defined')
-        return self.data[self.iso_index]
+        return self.data[:, self.iso_index]
 
     def get_downsampled(self, factor=None):
         if factor is None:
@@ -81,9 +82,7 @@ class SessionSite():
         subjects = recordings.loc[:, 'subject'].unique()
         sessions = recordings.loc[:, 'session'].unique()
         tasks = recordings.loc[:, 'task'].unique()
-        runs = recordings.loc[:, 'run'].unique()
         labels = recordings.loc[:, 'label'].unique()
-        channels = recordings.loc[:, 'channel'].unique()
         if any([item.shape[0] != 1
                 for item in [subjects, sessions, tasks, labels]]):
             msg = ('Multiple session names found for session'
@@ -91,15 +90,13 @@ class SessionSite():
             msg = msg.format(subject, session, label)
             logging.error(msg)
             raise ValueError(msg)
-        if (runs.unique().shape[0] != 1):
-            msg = ('Multiple runs not yet implemented (subject {}, session {}'
-                   ' and label {})').format(subject, session, label)
-            raise NotImplementedError(msg)
 
         # Load all channels
         data = []
         t0 = None
         fs = None
+        channels = []
+        runs = []
         for r in recordings.itertuples():
             d, meta = load_channel(base=root/'rawdata',
                                    subject=r.subject,
@@ -118,6 +115,13 @@ class SessionSite():
                 msg.format(subject, session, label)
                 raise ValueError(msg)
             data.append(d)
+            runs.append(r.run)
+            channels.append(r.channel)
+
+        if (np.unique(runs).shape[0] != 1):
+            msg = ('Multiple runs not yet implemented (subject {}, session {}'
+                   ' and label {})').format(subject, session, label)
+            raise NotImplementedError(msg)
 
         sl = SessionSite()
         sl.subject = subject
@@ -126,6 +130,8 @@ class SessionSite():
         sl.task = tasks[0]
         sl.runs = runs
         sl.channels = channels
+        if iso_channel is not None:
+            sl.iso_index = channels.index(iso_channel)
         sl.ts = np.arange(data[0].shape[0]) / fs + t0
         sl.data = np.vstack(data).T
         sl.fs = fs
@@ -168,21 +174,72 @@ def load_channels(base, subject, session, task, run, label, channels,
         return ds, ts[::downsample]
 
 
-def find_disconnects(site, mean_window=5, std_window=30, std_thresh=3):
+def find_discontinuities(site, mean_window=3, std_window=30, nstd_thresh=2):
+    # This currently relies on the isobestic channel being valid.
+
     # How many samples to consider for the sliding mean
     n = int(site.fs * mean_window)
     # Assume that the STD of the iso channel is constant. We can
     # then use the median of a sliding window STD as our
     # characteristic STD.
     std_n = int(site.fs * std_window)
-    thresh = np.median(np.std(sliding_window_view(site.iso(), std_n), axis=-1))
-    thresh *= std_thresh
-    # 
-    iso = np.mean(sliding_window_view(np.pad(site.iso(), n, 'edge')), axis=-1)
-    d = np.diff(iso, -n)
-    d_thresh = d.abs() > std_thresh
-    d_peaks = sig.find_peaks(d.abs(), prominence=iso_rstds.median())[0]
-    d_thresh_peaks = d_thresh.iloc[d_peaks]
+    # iso_rstds = np.std(sliding_window_view(site.iso(), std_n), axis=-1)
+    data = site.iso()
+    iso_rstds = bn.move_std(data, std_n, axis=-1)
+    thresh = np.median(iso_rstds[~np.isnan(iso_rstds)], axis=-1)
+    mean_thresh = thresh * nstd_thresh
+    # Calculate a sliding mean 
+    # iso_rmeans = np.mean(sliding_window_view(np.pad(site.iso(), n, 'edge'), n), axis=-1)
+    iso_rmeans = bn.move_mean(np.pad(data, n, 'edge'), n, axis=-1)
+    d = (iso_rmeans[n:-n] - iso_rmeans[(n*2):])
+    d_thresh = np.abs(d) > mean_thresh
+    # Find the start and end of each mean shift
+    mean_shift_bounds = np.diff(d_thresh.astype(int))
+    try:
+        # If the first bound is a falling edge, insert a rising edge
+        if mean_shift_bounds[0] == -1:
+            mean_shift_bounds[0] = 0
+        elif mean_shift_bounds[mean_shift_bounds != 0][0] == -1:
+            mean_shift_bounds[0] = 1
+        # If the last bound is a rising edge, insert a falling edge
+        if mean_shift_bounds[-1] == 1:
+            mean_shift_bounds[-1] = 0
+        elif mean_shift_bounds[mean_shift_bounds != 0][-1] == 1:
+            mean_shift_bounds[-1] = -1
+    except IndexError:
+        pass
+    # For each shift, adjust the bounds by searching from the opposite
+    # bound and looking for the first time the signal (rather than the
+    # mean) is within the threshold bounds.
+    onsets = np.where(mean_shift_bounds == 1)[0]
+    offsets = np.where(mean_shift_bounds == -1)[0]
+    for i, (onset, offset) in enumerate(zip(onsets, offsets)):
+        k = np.argmax(np.abs(data[offset:onset:-1] - iso_rmeans[onset+n]) < thresh)
+        if k > 0:
+            onsets[i] = offset - k
+        k = np.argmax(np.abs(data[onset:offset:1] - iso_rmeans[offset+n]) < thresh)
+        if k > 0:
+            offsets[i] = onset + k
+    return list(zip(onsets, offsets))
+
+
+def find_disconnects(site, zero_nstd_thresh=5, mean_window=3, std_window=30,
+                     nstd_thresh=2):
+    bounds = find_discontinuities(site, mean_window=mean_window,
+                                  std_window=std_window, nstd_thresh=nstd_thresh)
+    data = site.iso()
+    std_n = int(site.fs * std_window)
+    data_rstds = bn.move_std(data, std_n, axis=-1)
+    data_rstds = data_rstds[~np.isnan(data_rstds)]
+    zero_thresh = np.median(data_rstds, axis=-1) * zero_nstd_thresh
+    dc_intervals = IntervalTree()
+    bounds = [(0, 0)] + bounds + [(len(data)-1, len(data)-1)]
+    for (on0, off0), (on1, off1) in zip(bounds[:-1], bounds[1:]):
+        if np.mean(data[off0:on1]) < zero_thresh:
+            dc_intervals.add(Interval(on0, off1))
+    dc_intervals.merge_overlaps()
+    return [(b[0], b[1]) for b in list(dc_intervals)]
+
 
 def map_events(events: Iterable[Event]):
     """ Create a dict mapping event codes to the respective events. """

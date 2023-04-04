@@ -72,11 +72,19 @@ class Dashboard(param.Parameterized):
 dashboard = Dashboard()
 pn.serve(dashboard.view(), port=8080)
 
+# %%
+site = fp.SessionSite.load(BIDSROOT, '18', 'RR10.4', 'RDMS', 'iso')
+bounds = fp.find_discontinuities(site, mean_window=3, nstd_thresh=2)
+bounds = fp.find_disconnects(site)
+iso_shade = datashade(hv.Curve((site.ts, site.iso())),
+                      aggregator=ds.count(), cmap='blue')
+start_lines = hv.Overlay([hv.VLine(site.ts[i]).opts(color='green') for i, j in bounds])
+end_lines = hv.Overlay([hv.VLine(site.ts[j]).opts(color='red') for i, j in bounds])
+(iso_shade.opts(width=800) * start_lines * end_lines).redim(
+    x='time', y=hv.Dimension('F')).opts(height=300)
 
 # %%
-for run in runs.loc[runs.task.isin(['FI15', 'RR5', 'RR10'])]:
-    fp.load_channel(RAWROOT, run.sub, run.ses, run.task, run.run, run.label,
-                    'dLight', downsample=downsample_factor)
+
 
 # %%
 BIDSROOT = Path('..')
@@ -113,7 +121,9 @@ iso_df = pd.Series(iso_pad, index=ts_pad)
 
 # %%
 #
+from numpy.lib.stride_tricks import sliding_window_view
 std_n = int(dlight_meta['fs'] / downsample_factor * 30)
+np.std(sliding_window_view(iso_pad, std_n), axis=-1).shape
 iso_rmeans = iso_df.rolling(n).mean()
 iso_rstds = iso_df.rolling(std_n).std()
 d = iso_rmeans.diff(-n)
