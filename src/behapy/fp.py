@@ -1,3 +1,4 @@
+from copy import copy
 from typing import Tuple, Iterable
 from pathlib import Path
 import json
@@ -11,7 +12,8 @@ import statsmodels.api as sm
 from intervaltree import IntervalTree, Interval
 from numpy.lib.stride_tricks import sliding_window_view
 import bottleneck as bn
-from .pathutils import get_fibre_path, get_events_path, get_recordings
+from .pathutils import get_fibre_path, get_recordings, \
+    get_rejected_intervals_path
 
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
@@ -44,6 +46,7 @@ def SessionMeta():
 class SessionSite():
 
     def __init__(self):
+        self.root = None
         self.subject = None
         self.session = None
         self.task = None
@@ -53,23 +56,50 @@ class SessionSite():
         self.iso_index = None
         self.ts = None
         self.data = None
-        self.mask_intervals = []
+        self.rejections = None
         self.fs = None
+
+
+    def __copy__(self):
+        site = SessionSite()
+        site.root = self.root
+        site.subject = self.subject
+        site.session = self.session
+        site.task = self.task
+        site.runs = self.runs
+        site.label = self.label
+        site.channels = copy(self.channels)
+        site.iso_index = self.iso_index
+        site.ts = self.ts
+        site.data = self.data
+        site.rejections = copy(self.rejections)
+        site.fs = self.fs
+        return site
+    
+    def __deepcopy__(self):
+        site = copy(self)
+        site.data = copy(self.data)
+        return site
 
     def iso(self):
         if self.iso_index is None:
             raise ValueError('Isosbestic channel not defined')
         return self.data[:, self.iso_index]
 
-    def get_downsampled(self, factor=None):
+    def signal(self):
+        if self.data.shape[1] != 2:
+            raise ValueError('Only one channel is supported.')
+        return self.data[:, (self.iso_index + 1) % 2]
+    
+    def downsample(self, factor=None):
         if factor is None:
             # Downsample to something reasonable
             factor = 1
             while self.fs / factor > 20:
                 factor *= 2
-        data_ds = sig.decimate(self._rawdata, factor, ftype='fir', zero_phase=True,
+        data_ds = sig.decimate(self.data, factor, ftype='fir', zero_phase=True,
                                axis=0)
-        ds = self.copy()
+        ds = copy(self)
         ds.fs = self.fs / factor
         ds.ts = self.ts[::factor]
         ds.data = data_ds
@@ -123,7 +153,15 @@ class SessionSite():
                    ' and label {})').format(subject, session, label)
             raise NotImplementedError(msg)
 
+        # Load rejected intervals if present
+        rej_fn = get_rejected_intervals_path(root, subject, session, label)
+        if rej_fn.exists():
+            # Load the CSV
+            rej = pd.read_csv(rej_fn)
+            
+
         sl = SessionSite()
+        sl.root = root
         sl.subject = subject
         sl.session = session
         sl.label = label
@@ -240,6 +278,29 @@ def find_disconnects(site, zero_nstd_thresh=5, mean_window=3, std_window=30,
     dc_intervals.merge_overlaps()
     return [(b[0], b[1]) for b in list(dc_intervals)]
 
+
+def fit(site):
+    """ Fit the site data to the isobestic channel. """
+    if site.data.shape[1] != 2:
+        raise ValueError('Only one channel is supported.')
+    rlm_model = sm.RLM(site.signal(), site.iso())
+    return rlm_model.fit()
+
+
+def normalise_site(site):
+    """ Normalise the site data to the isobestic channel. """
+    iso = site.iso()
+    
+    for i, channel in enumerate(site.channels):
+        if i != site.iso_index:
+            site.data[channel] = site.data[channel] / iso
+    return site
+
+def save_rejected_intervals(site: 'SessionSite',
+                            intervals: 'Sequence[Tuple[int, int]]'):
+    path = get_rejected_intervals_path(site.root, site.subject, site.session,
+                                       site.task, site.label)
+    
 
 def map_events(events: Iterable[Event]):
     """ Create a dict mapping event codes to the respective events. """

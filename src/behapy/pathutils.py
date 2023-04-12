@@ -22,12 +22,11 @@ def get_fibre_path(base, sub, ses, task, run, label, channel, ext):
                                   label=label, channel=channel, ext=ext)
 
 
-def get_fibre_segments_path(base, sub, ses, task, run, label):
-    root = get_session_root(base, sub, ses)
-    template = ('fp/sub-{sub}_ses-{ses}_task-{task}_run-{run}_label-{label}_'
-                'segments.csv')
-    return root / template.format(sub=sub, ses=ses, task=task, run=run,
-                                  label=label)
+def get_rejected_intervals_path(root, sub, ses, task, label):
+    root = get_session_root(root / 'derivatives/preprocess', sub, ses)
+    template = ('sub-{sub}_ses-{ses}_task-{task}_label-{label}_'
+                'rejected-intervals.csv')
+    return root / template.format(sub=sub, ses=ses, task=task, label=label)
 
 
 def get_recordings(base, subject='*', session='*', label='*'):
@@ -57,3 +56,4 @@ def get_recordings(base, subject='*', session='*', label='*'):
 
 def get_session_meta_path(root):
     return Path(root) / 'session-meta.csv'
+
