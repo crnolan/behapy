@@ -11,12 +11,11 @@ import holoviews as hv
 from holoviews import opts
 import datashader as ds
 from holoviews.operation.datashader import datashade, dynspread, rasterize
-hv.extension('bokeh')
 import panel as pn
 import param
 from bokeh.models import ColumnDataSource
 from bokeh.plotting import figure
-pn.extension('tabulator', comms='vscode')
+# pn.extension(comms='vscode')
 import behapy.visuals as vis
 
 # %%
@@ -37,8 +36,15 @@ def get_recording(index):
     return ds_site, intervals
 
 
+def filter_fit(site, intervals):
+    rej = fp.reject(site, intervals)
+    fit = fp.fit(rej)
+    rej.data[:, (rej.iso_index + 1) % 2] = fit.fittedvalues
+    return rej
+
+
 # %%
-dash = vis.PreprocessDashboard(sites, get_recording, fp.fit)
+dash = vis.PreprocessDashboard(sites, get_recording, filter_fit)
 # dash.view()
 pn.serve(dash.view(), port=8080)
 
@@ -49,9 +55,10 @@ downsample_factor = 64
 
 
 # %%
-site = fp.SessionSite.load(BIDSROOT, '18', 'RR10.4', 'RDMS', 'iso')
-# bounds = fp.find_discontinuities(site, mean_window=3, nstd_thresh=2)
-bounds = fp.find_disconnects(site)
+site = fp.SessionSite.load(BIDSROOT, '27', 'Retrain1.1', 'LDMS', 'iso')
+site = site.downsample(64)
+bounds = fp.find_discontinuities(site, mean_window=3, nstd_thresh=2)
+# bounds = fp.find_disconnects(site)
 iso_shade = datashade(hv.Curve((site.ts, site.iso())),
                       aggregator=ds.count(), cmap='blue')
 start_lines = hv.Overlay([hv.VLine(site.ts[i]).opts(color='green') for i, j in bounds])

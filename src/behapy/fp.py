@@ -18,31 +18,7 @@ from .pathutils import get_fibre_path, get_recordings, \
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
 
-
-def SessionMeta():
-
-    def __init__(self, sub, ses, task, run, label, channel, 
-                 fs=None, start_time=None):
-        self.sub = sub
-        self.ses = ses
-        self.task = task
-        self.label = label
-        self.channel = channel
-        self.meta = {
-            'fs': fs,
-            'start_time': start_time,
-        }
-
-    def from_json(filename):
-        session_meta = SessionMeta()
-        with open(filename) as file:
-            session_meta.meta = json.load(file)
-        return session_meta
-    
-    def to_json():
-        pass
-
-
+# Need to convert this to a pandas DataFrame
 class SessionSite():
 
     def __init__(self):
@@ -79,6 +55,7 @@ class SessionSite():
     def __deepcopy__(self):
         site = copy(self)
         site.data = copy(self.data)
+        site.ts = copy(self.ts)
         return site
 
     def iso(self):
@@ -153,13 +130,6 @@ class SessionSite():
                    ' and label {})').format(subject, session, label)
             raise NotImplementedError(msg)
 
-        # Load rejected intervals if present
-        rej_fn = get_rejected_intervals_path(root, subject, session, label)
-        if rej_fn.exists():
-            # Load the CSV
-            rej = pd.read_csv(rej_fn)
-            
-
         sl = SessionSite()
         sl.root = root
         sl.subject = subject
@@ -212,6 +182,26 @@ def load_channels(base, subject, session, task, run, label, channels,
         return ds, ts[::downsample]
 
 
+def save_rejections(tree, root, subject, session, label):
+    # Save the provided IntervalTree as a CSV
+    rej_fn = get_rejected_intervals_path(root, subject, session, label)
+    tree.merge_overlaps()
+    df = pd.DataFrame.from_records([(b[0], b[1]) for b in list(tree)],
+                                    columns=['start_time', 'end_time'])
+    df.to_csv(rej_fn, index=False)
+
+
+def load_rejections(root, subject, session, label):
+    # Load rejected intervals if present
+    rej_fn = get_rejected_intervals_path(root, subject, session, label)
+    intervals = []
+    if rej_fn.exists():
+        # Load the CSV
+        rej = pd.read_csv(rej_fn)
+        intervals = [(r.start_time, r.end_time) for r in rej.itertuples()]
+    return IntervalTree.from_tuples(intervals)
+
+
 def find_discontinuities(site, mean_window=3, std_window=30, nstd_thresh=2):
     # This currently relies on the isobestic channel being valid.
 
@@ -258,7 +248,8 @@ def find_discontinuities(site, mean_window=3, std_window=30, nstd_thresh=2):
         k = np.argmax(np.abs(data[onset:offset:1] - iso_rmeans[offset+n]) < thresh)
         if k > 0:
             offsets[i] = onset + k
-    return list(zip(onsets, offsets))
+    return [(onset, offset) for onset, offset in zip(onsets, offsets)
+                            if offset - onset > 0]
 
 
 def find_disconnects(site, zero_nstd_thresh=5, mean_window=3, std_window=30,
@@ -274,9 +265,23 @@ def find_disconnects(site, zero_nstd_thresh=5, mean_window=3, std_window=30,
     bounds = [(0, 0)] + bounds + [(len(data)-1, len(data)-1)]
     for (on0, off0), (on1, off1) in zip(bounds[:-1], bounds[1:]):
         if np.mean(data[off0:on1]) < zero_thresh:
-            dc_intervals.add(Interval(on0, off1))
+            dc_intervals.add(Interval(site.ts[on0], site.ts[off1]))
     dc_intervals.merge_overlaps()
-    return [(b[0], b[1]) for b in list(dc_intervals)]
+    # return [(b[0], b[1]) for b in list(dc_intervals)]
+    return dc_intervals
+
+
+def reject(site, intervals):
+    """ Filter the site data to remove the specified intervals. """
+    intervals.merge_overlaps()
+    interval_list = [(i[0], i[1]) for i in list(intervals)]
+    mask = np.ones(site.data.shape[0], dtype=bool)
+    for start, end in interval_list:
+        mask &= (site.ts < start) | (site.ts > end)
+    newsite = copy(site)
+    newsite.ts = site.ts[mask]
+    newsite.data = site.data[mask, :]
+    return newsite
 
 
 def fit(site):
@@ -286,15 +291,6 @@ def fit(site):
     rlm_model = sm.RLM(site.signal(), site.iso())
     return rlm_model.fit()
 
-
-def normalise_site(site):
-    """ Normalise the site data to the isobestic channel. """
-    iso = site.iso()
-    
-    for i, channel in enumerate(site.channels):
-        if i != site.iso_index:
-            site.data[channel] = site.data[channel] / iso
-    return site
 
 def save_rejected_intervals(site: 'SessionSite',
                             intervals: 'Sequence[Tuple[int, int]]'):
