@@ -1,4 +1,3 @@
-from copy import copy
 from typing import Tuple, Iterable
 from pathlib import Path
 import json
@@ -18,132 +17,13 @@ from .pathutils import get_fibre_path, get_recordings, \
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
 
-# Need to convert this to a pandas DataFrame
-class SessionSite():
 
-    def __init__(self):
-        self.root = None
-        self.subject = None
-        self.session = None
-        self.task = None
-        self.runs = []
-        self.label = None
-        self.channels = []
-        self.iso_index = None
-        self.ts = None
-        self.data = None
-        self.rejections = None
-        self.fs = None
-
-
-    def __copy__(self):
-        site = SessionSite()
-        site.root = self.root
-        site.subject = self.subject
-        site.session = self.session
-        site.task = self.task
-        site.runs = self.runs
-        site.label = self.label
-        site.channels = copy(self.channels)
-        site.iso_index = self.iso_index
-        site.ts = self.ts
-        site.data = self.data
-        site.rejections = copy(self.rejections)
-        site.fs = self.fs
-        return site
-    
-    def __deepcopy__(self):
-        site = copy(self)
-        site.data = copy(self.data)
-        site.ts = copy(self.ts)
-        return site
-
-    def iso(self):
-        if self.iso_index is None:
-            raise ValueError('Isosbestic channel not defined')
-        return self.data[:, self.iso_index]
-
-    def signal(self):
-        if self.data.shape[1] != 2:
-            raise ValueError('Only one channel is supported.')
-        return self.data[:, (self.iso_index + 1) % 2]
-    
-    def downsample(self, factor=None):
-        if factor is None:
-            # Downsample to something reasonable
-            factor = 1
-            while self.fs / factor > 20:
-                factor *= 2
-        data_ds = sig.decimate(self.data, factor, ftype='fir', zero_phase=True,
-                               axis=0)
-        ds = copy(self)
-        ds.fs = self.fs / factor
-        ds.ts = self.ts[::factor]
-        ds.data = data_ds
-        return ds
-    
-    def load(root, subject, session, label, iso_channel):
-        root = Path(root)
-        recordings = pd.DataFrame(get_recordings(root / 'rawdata',
-                                                 subject, session, label))
-        subjects = recordings.loc[:, 'subject'].unique()
-        sessions = recordings.loc[:, 'session'].unique()
-        tasks = recordings.loc[:, 'task'].unique()
-        labels = recordings.loc[:, 'label'].unique()
-        if any([item.shape[0] != 1
-                for item in [subjects, sessions, tasks, labels]]):
-            msg = ('Multiple session names found for session'
-                   ' with subject {}, session {} and label {}')
-            msg = msg.format(subject, session, label)
-            logging.error(msg)
-            raise ValueError(msg)
-
-        # Load all channels
-        data = []
-        t0 = None
-        fs = None
-        channels = []
-        runs = []
-        for r in recordings.itertuples():
-            d, meta = load_channel(base=root/'rawdata',
-                                   subject=r.subject,
-                                   session=r.session,
-                                   task=r.task,
-                                   run=r.run,
-                                   label=r.label,
-                                   channel=r.channel)
-            if fs is None:
-                fs = meta['fs']
-            if t0 is None:
-                t0 = meta['start_time']
-            if (fs != meta['fs']) or (t0 != meta['start_time']):
-                msg = ('Unequal sample frequencies and/or start times'
-                       ' for subject {}, session {} and label {}')
-                msg.format(subject, session, label)
-                raise ValueError(msg)
-            data.append(d)
-            runs.append(r.run)
-            channels.append(r.channel)
-
-        if (np.unique(runs).shape[0] != 1):
-            msg = ('Multiple runs not yet implemented (subject {}, session {}'
-                   ' and label {})').format(subject, session, label)
-            raise NotImplementedError(msg)
-
-        sl = SessionSite()
-        sl.root = root
-        sl.subject = subject
-        sl.session = session
-        sl.label = label
-        sl.task = tasks[0]
-        sl.runs = runs
-        sl.channels = channels
-        if iso_channel is not None:
-            sl.iso_index = channels.index(iso_channel)
-        sl.ts = np.arange(data[0].shape[0]) / fs + t0
-        sl.data = np.vstack(data).T
-        sl.fs = fs
-        return sl
+def series_like(df, name, default=0.):
+    series = pd.Series(default, index=df.index, name=name)
+    series.attrs = df.attrs.copy()
+    _ = series.attrs.pop('iso_channel', None)
+    _ = series.attrs.pop('channel', None)
+    return series
 
 
 def load_channel(base, subject, session, task, run, label, channel):
@@ -157,66 +37,146 @@ def load_channel(base, subject, session, task, run, label, channel):
     return data, meta
 
 
-def load_channels(base, subject, session, task, run, label, channels,
-                  downsample=None):
-    fs = None
-    t0 = None
+def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
+    """Load a raw signal, including the isosbestic channel if present.
+    """
+    base = Path(root / 'rawdata')
+    recordings = pd.DataFrame(
+        get_recordings(base, subject=subject, session=session, task=task,
+                       run=run, label=label))
+    subjects = recordings.loc[:, 'subject'].unique()
+    sessions = recordings.loc[:, 'session'].unique()
+    tasks = recordings.loc[:, 'task'].unique()
+    labels = recordings.loc[:, 'label'].unique()
+    if any([item.shape[0] != 1
+            for item in [subjects, sessions, tasks, labels]]):
+        msg = ('Multiple signal names found for session'
+               ' with subject {}, session {}, task {}, run {} and label {}')
+        msg = msg.format(subject, session, task, run, label)
+        logging.error(msg)
+        raise ValueError(msg)
+
+    if not (1 <= recordings.loc[:, 'channel'].unique().shape[0] <= 2):
+        msg = ('Only one channel (signal) or two channels (signal and iso) '
+               'are supported (subject {}, session {}, task {}, run {} and '
+               'label {})'
+               ).format(subject, session, task, run, label)
+        raise NotImplementedError(msg)
+
+    # Load channels
     data = []
-    for channel in channels:
-        d, meta = load_channel(base, subject, session, task, run, label,
-                               channel)
+    t0 = None
+    fs = None
+    for r in recordings.itertuples():
+        d, meta = load_channel(base=base,
+                               subject=r.subject,
+                               session=r.session,
+                               task=r.task,
+                               run=r.run,
+                               label=r.label,
+                               channel=r.channel)
         if fs is None:
             fs = meta['fs']
         if t0 is None:
             t0 = meta['start_time']
         if (fs != meta['fs']) or (t0 != meta['start_time']):
-            raise ValueError('Unequal sample frequencies and/or start times.')
-        data.append(d)
-    ts = np.arange(data[0].shape[0]) / fs + t0
-    sdata = np.vstack(data).T
-    if downsample is None:
-        return sdata, ts
+            msg = ('Unequal sample frequencies and/or start times '
+                   'for subject {}, session {}, task {}, run {} and label {}')
+            msg.format(subject, session, task, run, label)
+            raise ValueError(msg)
+        data.append(pd.Series(d, name=r.channel,
+                              index=np.arange(d.shape[0]) / fs + t0))
+
+    signal = pd.concat(data, axis=1)
+    signal.index.name = 'time'
+    signal.attrs['root'] = root
+    signal.attrs['fs'] = fs
+    signal.attrs['start_time'] = t0
+    signal.attrs['subject'] = subject
+    signal.attrs['session'] = session
+    signal.attrs['task'] = task
+    signal.attrs['run'] = run
+    signal.attrs['label'] = label
+    channels = signal.columns.to_list()
+    if len(channels) > 2:
+        msg = ('Too many channels for subject {}, session {}, '
+               'task {}, run {} and label {}')
+        raise ValueError(msg.format(subject, session, task, run, label))
+    elif len(channels) == 2:
+        if signal.columns.get_loc(iso_channel) is None:
+            msg = ('Iso channel {} not found for subject {}, '
+                   'session {}, task {}, run {} and label {}')
+            raise ValueError(msg.format(iso_channel, subject, session, task,
+                                        run, label))
+
+        signal.attrs['iso_channel'] = iso_channel
+        channels.remove(iso_channel)
+        signal.attrs['channel'] = channels.pop()
+    elif len(channels) == 1:
+        signal.attrs['iso_channel'] = None
+        signal.attrs['channel'] = channels.pop()
     else:
-        ds = sig.decimate(sdata, downsample, ftype='fir', zero_phase=True,
-                          axis=0)
-        return ds, ts[::downsample]
+        msg = ('No channels found for subject {}, session {}, '
+               'task {}, run {} and label {}')
+        raise ValueError(msg.format(subject, session, task, run, label))
+    return signal
 
 
-def save_rejections(tree, root, subject, session, label):
+def downsample(signal, factor=None):
+    if factor is None:
+        # Downsample to something reasonable
+        factor = 1
+        while signal.attrs['fs'] / factor > 20:
+            factor *= 2
+    ds = sig.decimate(signal.to_numpy(), factor, ftype='fir',
+                      zero_phase=True, axis=0)
+    ts = (np.arange(ds.shape[0]) / (signal.attrs['fs'] / factor) +
+          signal.attrs['start_time'])
+    df = pd.DataFrame(ds, index=ts, columns=signal.columns)
+    df.attrs = signal.attrs
+    df.attrs['fs'] = signal.attrs['fs'] / factor
+    return df
+
+
+def save_rejections(tree, root, subject, session, task, run, label):
     # Save the provided IntervalTree as a CSV
-    rej_fn = get_rejected_intervals_path(root, subject, session, label)
+    fn = get_rejected_intervals_path(root, subject, session, task, run,
+                                     label)
     tree.merge_overlaps()
     df = pd.DataFrame.from_records([(b[0], b[1]) for b in list(tree)],
-                                    columns=['start_time', 'end_time'])
-    df.to_csv(rej_fn, index=False)
+                                   columns=['start_time', 'end_time'])
+    fn.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(fn, index=False)
 
 
-def load_rejections(root, subject, session, label):
+def load_rejections(root, subject, session, task, run, label):
     # Load rejected intervals if present
-    rej_fn = get_rejected_intervals_path(root, subject, session, label)
+    fn = get_rejected_intervals_path(root, subject, session, task, run,
+                                     label)
     intervals = []
-    if rej_fn.exists():
-        # Load the CSV
-        rej = pd.read_csv(rej_fn)
-        intervals = [(r.start_time, r.end_time) for r in rej.itertuples()]
+    if not fn.exists():
+        return None
+    # Load the CSV
+    rej = pd.read_csv(fn)
+    intervals = [(r.start_time, r.end_time) for r in rej.itertuples()]
     return IntervalTree.from_tuples(intervals)
 
 
-def find_discontinuities(site, mean_window=3, std_window=30, nstd_thresh=2):
+def find_discontinuities(signal, mean_window=3, std_window=30, nstd_thresh=2):
     # This currently relies on the isobestic channel being valid.
 
     # How many samples to consider for the sliding mean
-    n = int(site.fs * mean_window)
+    n = int(signal.attrs['fs'] * mean_window)
     # Assume that the STD of the iso channel is constant. We can
     # then use the median of a sliding window STD as our
     # characteristic STD.
-    std_n = int(site.fs * std_window)
+    std_n = int(signal.attrs['fs'] * std_window)
     # iso_rstds = np.std(sliding_window_view(site.iso(), std_n), axis=-1)
-    data = site.iso()
+    data = signal[signal.attrs['iso_channel']].to_numpy()
     iso_rstds = bn.move_std(data, std_n, axis=-1)
     thresh = np.median(iso_rstds[~np.isnan(iso_rstds)], axis=-1)
     mean_thresh = thresh * nstd_thresh
-    # Calculate a sliding mean 
+    # Calculate a sliding mean
     # iso_rmeans = np.mean(sliding_window_view(np.pad(site.iso(), n, 'edge'), n), axis=-1)
     iso_rmeans = bn.move_mean(np.pad(data, n, 'edge'), n, axis=-1)
     d = (iso_rmeans[n:-n] - iso_rmeans[(n*2):])
@@ -248,16 +208,18 @@ def find_discontinuities(site, mean_window=3, std_window=30, nstd_thresh=2):
         k = np.argmax(np.abs(data[onset:offset:1] - iso_rmeans[offset+n]) < thresh)
         if k > 0:
             offsets[i] = onset + k
-    return [(onset, offset) for onset, offset in zip(onsets, offsets)
-                            if offset - onset > 0]
+    return [(onset, offset)
+            for onset, offset in zip(onsets, offsets)
+            if offset - onset > 0]
 
 
-def find_disconnects(site, zero_nstd_thresh=5, mean_window=3, std_window=30,
+def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
                      nstd_thresh=2):
-    bounds = find_discontinuities(site, mean_window=mean_window,
+    bounds = find_discontinuities(signal, mean_window=mean_window,
                                   std_window=std_window, nstd_thresh=nstd_thresh)
-    data = site.iso()
-    std_n = int(site.fs * std_window)
+    data = signal[signal.attrs['iso_channel']].to_numpy()
+    ts = signal.index.to_numpy()
+    std_n = int(signal.attrs['fs'] * std_window)
     data_rstds = bn.move_std(data, std_n, axis=-1)
     data_rstds = data_rstds[~np.isnan(data_rstds)]
     zero_thresh = np.median(data_rstds, axis=-1) * zero_nstd_thresh
@@ -265,38 +227,40 @@ def find_disconnects(site, zero_nstd_thresh=5, mean_window=3, std_window=30,
     bounds = [(0, 0)] + bounds + [(len(data)-1, len(data)-1)]
     for (on0, off0), (on1, off1) in zip(bounds[:-1], bounds[1:]):
         if np.mean(data[off0:on1]) < zero_thresh:
-            dc_intervals.add(Interval(site.ts[on0], site.ts[off1]))
+            dc_intervals.add(Interval(ts[on0], ts[off1]))
     dc_intervals.merge_overlaps()
     # return [(b[0], b[1]) for b in list(dc_intervals)]
     return dc_intervals
 
 
-def reject(site, intervals):
+def reject(signal, intervals):
     """ Filter the site data to remove the specified intervals. """
     intervals.merge_overlaps()
     interval_list = [(i[0], i[1]) for i in list(intervals)]
-    mask = np.ones(site.data.shape[0], dtype=bool)
+    mask = pd.Series(True, index=signal.index)
     for start, end in interval_list:
-        mask &= (site.ts < start) | (site.ts > end)
-    newsite = copy(site)
-    newsite.ts = site.ts[mask]
-    newsite.data = site.data[mask, :]
-    return newsite
+        mask.loc[start:end] = False
+    return signal[mask].copy()
 
 
-def fit(site):
+def fit(signal):
     """ Fit the site data to the isobestic channel. """
-    if site.data.shape[1] != 2:
+    if signal.shape[1] != 2:
         raise ValueError('Only one channel is supported.')
-    rlm_model = sm.RLM(site.signal(), site.iso())
+    rlm_model = sm.RLM(signal[signal.attrs['channel']],
+                       signal[signal.attrs['iso_channel']])
     return rlm_model.fit()
 
 
-def save_rejected_intervals(site: 'SessionSite',
+def save_rejected_intervals(signal: 'pd.DataFrame',
                             intervals: 'Sequence[Tuple[int, int]]'):
-    path = get_rejected_intervals_path(site.root, site.subject, site.session,
-                                       site.task, site.label)
-    
+    path = get_rejected_intervals_path(signal.attrs['base'],
+                                       signal.attrs['subject'],
+                                       signal.attrs['session'],
+                                       signal.attrs['task'],
+                                       signal.attrs['run'],
+                                       signal.attrs['label'])
+
 
 def map_events(events: Iterable[Event]):
     """ Create a dict mapping event codes to the respective events. """
@@ -327,18 +291,18 @@ def smooth(x, fs):
     return sig.resample(xf, x.shape[0])
 
 
-def detrend_hp(x, fs):
+def detrend_hp(x, fs, numtaps=1001):
     try:
         b = detrend_hp.filter_b
     except AttributeError:
         # b = sig.firwin2(int(fs*8), freq=[0, 0.1, 0.2, 0.4, fs/2],
         #                 gain=[0., 1e-7, 0.1, 1., 1.], fs=fs)
-        b = sig.firwin2(1001, freq=[0, 0.05, 0.1, fs/2],
+        b = sig.firwin2(numtaps, freq=[0, 0.05, 0.1, fs/2],
                         gain=[0., 0.001, 1., 1.], fs=fs)
         detrend_hp.filter_b = b
     return sig.filtfilt(b, 1, x)
 
-    
+
 def normalise(signal, control, mask, fs, method='fit', detrend=True):
     # smoothed = smooth(control[~mask], fs=fs)
     smoothed = control[~mask]
@@ -352,7 +316,7 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
     if detrend:
         # Filter with a highpass filter to remove remaining drift
         df = detrend_hp(df, fs)
-        
+
     if method == 'fit':
         dff = df / signal_fit
         return dff / dff.std()
@@ -396,7 +360,7 @@ def epoch_events(data: Iterable[float],
         tstart: Time in seconds of the first sample of data,
         method: Baselining method, either z-scored ('z', default),
             baseline mean subtracted ('base') or unbaselined signal ('nobase').
-    
+
     Returns:
         Array of (baselined) epoch values with a correponding timestamp array.
     """

@@ -25,26 +25,18 @@ ANALROOT = BIDSROOT / 'derivatives/ds64'
 
 # %%
 recordings = pd.DataFrame(get_recordings(RAWROOT))
-sites = recordings.loc[:, ['subject', 'session', 'label']].drop_duplicates()
+sites = recordings.loc[:, ['subject', 'session', 'task', 'run', 'label']].drop_duplicates()
 
 
 def get_recording(index):
     r = sites.iloc[index]
-    site = fp.SessionSite.load(BIDSROOT, r.subject, r.session, r.label, 'iso')
-    ds_site = site.downsample(64)
-    intervals = fp.find_disconnects(ds_site)
-    return ds_site, intervals
-
-
-def filter_fit(site, intervals):
-    rej = fp.reject(site, intervals)
-    fit = fp.fit(rej)
-    rej.data[:, (rej.iso_index + 1) % 2] = fit.fittedvalues
-    return rej
+    signal = fp.load_signal(BIDSROOT, r.subject, r.session, r.task, r.run,
+                            r.label, 'iso')
+    return signal
 
 
 # %%
-dash = vis.PreprocessDashboard(sites, get_recording, filter_fit)
+dash = vis.PreprocessDashboard(sites, get_recording)
 # dash.view()
 pn.serve(dash.view(), port=8080)
 

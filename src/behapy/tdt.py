@@ -8,9 +8,10 @@ import json
 from collections import defaultdict
 from .pathutils import get_fibre_path, get_events_path
 
+
 def load_session_tank_map(filename: str) -> pd.DataFrame:
     """Loads a file mapping sessions to the tank files.
-    
+
     Args:
         filename (str): path to the session mapping file
     """
@@ -49,9 +50,9 @@ def convert_stream(df, block, out_path):
     out_path = Path(out_path)
     if df.type == 'stream':
         data_fn = get_fibre_path(out_path, df.subject, df.session, df.task, df.run,
-                            df.label, df.channel, 'npy')
+                                 df.label, df.channel, 'npy')
         meta_fn = get_fibre_path(out_path, df.subject, df.session, df.task, df.run,
-                            df.label, df.channel, 'json')
+                                 df.label, df.channel, 'json')
         data_fn.parent.mkdir(parents=True, exist_ok=True)
         meta = {
             'fs': block.streams[df.tdt_id].fs,
@@ -76,5 +77,5 @@ def convert_block(df, raw_path):
         try:
             block = read_block(blocks[0])
             df.apply(convert_stream, block=block, out_path=raw_path, axis=1)
-        except FileNotFoundError as error:
+        except FileNotFoundError:
             logging.warn('Cannot open block at path {}'.format(blocks[0]))

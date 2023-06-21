@@ -22,21 +22,24 @@ def get_fibre_path(base, sub, ses, task, run, label, channel, ext):
                                   label=label, channel=channel, ext=ext)
 
 
-def get_rejected_intervals_path(root, sub, ses, task, label):
+def get_rejected_intervals_path(root, sub, ses, task, run, label):
     root = get_session_root(root / 'derivatives/preprocess', sub, ses)
-    template = ('sub-{sub}_ses-{ses}_task-{task}_label-{label}_'
+    template = ('sub-{sub}_ses-{ses}_task-{task}_run-{run}_label-{label}_'
                 'rejected-intervals.csv')
-    return root / template.format(sub=sub, ses=ses, task=task, label=label)
+    return root / template.format(sub=sub, ses=ses, task=task, run=run,
+                                  label=label)
 
 
-def get_recordings(base, subject='*', session='*', label='*'):
+def get_recordings(base, subject='*', session='*', task='*', run='*', label='*'):
     Recording = namedtuple("Recording", ["subject", "session", "task", "run", "label", "channel", "file_path"])
 
     # Set the pattern for the data files
     base = Path(base)
     pattern = ('sub-{subject}/ses-{session}/fp/'
-               'sub-{subject}_ses-{session}_task-*_run-*_label-{label}_channel-*.npy')
-    pattern = pattern.format(subject=subject, session=session, label=label)
+               'sub-{subject}_ses-{session}_'
+               'task-{task}_run-{run}_label-{label}_channel-*.npy')
+    pattern = pattern.format(subject=subject, session=session, task=task,
+                             run=run, label=label)
     # Search for files that match the pattern
     data_files = list(base.glob(str(pattern)))
     # Regex pattern to extract variables from the file names
