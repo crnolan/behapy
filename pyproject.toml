@@ -17,6 +17,7 @@ classifiers = [
 [project.scripts]
 tdt2bids = "behapy.console:tdt2bids_command"
 medpc2csv = "behapy.console:medpc2csv_command"
+ppd = "behapy.console:preprocess_dash_command"
 
 [project.urls]
 "Homepage" = "https://github.com/crnolan/behapy"
