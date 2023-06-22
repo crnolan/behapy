@@ -120,7 +120,6 @@ class PreprocessDashboard(param.Parameterized):
         return tabulator_widget
 
     def update_intervals(self):
-        print('Update intervals')
         ra = self.recording.attrs
         fp.save_rejections(self.intervals, ra['root'],
                            ra['subject'], ra['session'],
@@ -147,8 +146,8 @@ class PreprocessDashboard(param.Parameterized):
     def plot_all(self):
         if self.recording is None:
             return
-        rej_shade = rejection_shade(self.recording, self.intervals,
-                                    self.update_intervals)
+        # rej_shade = rejection_shade(self.recording, self.intervals,
+        #                             self.update_intervals)
         regression = self.regression
         isoch = self.recording.attrs['iso_channel']
         ch = self.recording.attrs['channel']
@@ -164,11 +163,15 @@ class PreprocessDashboard(param.Parameterized):
         dff_shade = datashade(
             signal_curve(self.dff, y_dim='dF/F'),
             aggregator=ds.count(), cmap='green')
-        plot = (rej_shade.opts(xaxis=None) +
-                (iso_shade * sig_shade * reg_shade).opts(xaxis=None) +
+        overlay = interval_overlay_map(iso_shade, self.intervals,
+                                       self.update_intervals)
+        # plot = (rej_shade.opts(xaxis=None) +
+        plot = ((iso_shade * sig_shade * reg_shade * overlay).opts(xaxis=None) +
                 dff_shade)
+        tools = ['xbox_select']
         plot = plot.opts(
-            opts.RGB(responsive=True, min_width=600, min_height=300))
+            opts.RGB(responsive=True, min_width=600, min_height=300,
+                     tools=tools))
         return plot.cols(1)
 
     def view(self):

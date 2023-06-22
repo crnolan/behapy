@@ -40,7 +40,7 @@ def load_channel(base, subject, session, task, run, label, channel):
 def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
     """Load a raw signal, including the isosbestic channel if present.
     """
-    base = Path(root / 'rawdata')
+    base = Path(root) / 'rawdata'
     recordings = pd.DataFrame(
         get_recordings(base, subject=subject, session=session, task=task,
                        run=run, label=label))

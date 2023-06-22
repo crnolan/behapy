@@ -3,9 +3,13 @@ import argparse
 import glob
 import json
 import pandas as pd
+import panel as pn
 from . import medpc
 from pathlib import Path
+from .pathutils import get_recordings
 from .tdt import load_session_tank_map, convert_block
+from .visuals import PreprocessDashboard
+from . import fp
 
 
 def tdt2bids(session_fn: str, bids_root: str) -> None:
@@ -38,7 +42,7 @@ def medpc2csv(source_pattern: str,
               output_path: str,
               config_fn: str) -> None:
     """Convert MedPC timestamp + event arrays to CSV
-    
+
     Will produce two CSV files, one for the experimental info and one
     for the event array.
 
@@ -92,3 +96,29 @@ def medpc2csv_command():
                         help='config file defining events variables')
     args = parser.parse_args()
     medpc2csv(**vars(args))
+
+
+def preprocess_dash(bidsroot):
+    bidsroot = Path(bidsroot)
+    recordings = pd.DataFrame(get_recordings(bidsroot / 'rawdata'))
+    signals = recordings.loc[:, ['subject', 'session', 'task', 'run', 'label']].drop_duplicates()
+
+    def get_recording(index):
+        r = signals.iloc[index]
+        signal = fp.load_signal(bidsroot, r.subject, r.session, r.task, r.run,
+                                r.label, 'iso')
+        return signal
+
+    dash = PreprocessDashboard(signals, get_recording)
+    pn.serve(dash.view(), port=8080)
+
+
+def preprocess_dash_command():
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+    parser = argparse.ArgumentParser(
+        description='Load the preprocessing dashboard'
+    )
+    parser.add_argument('bidsroot', type=str,
+                        help='path to the BIDS root')
+    args = parser.parse_args()
+    preprocess_dash(**vars(args))
