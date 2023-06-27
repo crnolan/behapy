@@ -30,6 +30,14 @@ def get_rejected_intervals_path(root, sub, ses, task, run, label):
                                   label=label)
 
 
+def get_preprocessed_fibre_path(root, sub, ses, task, run, label, ext):
+    root = get_session_root(root / 'derivatives/preprocess', sub, ses)
+    template = ('fp/sub-{sub}_ses-{ses}_task-{task}_run-{run}_label-{label}'
+                '.{ext}')
+    return root / template.format(sub=sub, ses=ses, task=task, run=run,
+                                  label=label, ext=ext)
+
+
 def get_recordings(base, subject='*', session='*', task='*', run='*', label='*'):
     Recording = namedtuple("Recording", ["subject", "session", "task", "run", "label", "channel", "file_path"])
 

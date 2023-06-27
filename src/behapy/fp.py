@@ -4,6 +4,7 @@ import json
 import logging
 import numpy as np
 import scipy.signal as sig
+from scipy.optimize import curve_fit
 from collections import namedtuple
 from typing import Iterable
 import pandas as pd
@@ -233,23 +234,22 @@ def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
     return dc_intervals
 
 
-def reject(signal, intervals):
+def reject(signal, intervals, fill=False):
     """ Filter the site data to remove the specified intervals. """
     intervals.merge_overlaps()
     interval_list = [(i[0], i[1]) for i in list(intervals)]
-    mask = pd.Series(True, index=signal.index)
-    for start, end in interval_list:
-        mask.loc[start:end] = False
-    return signal[mask].copy()
-
-
-def fit(signal):
-    """ Fit the site data to the isobestic channel. """
-    if signal.shape[1] != 2:
-        raise ValueError('Only one channel is supported.')
-    rlm_model = sm.RLM(signal[signal.attrs['channel']],
-                       signal[signal.attrs['iso_channel']])
-    return rlm_model.fit()
+    if fill:
+        # Return a copy of the signal with the rejected intervals
+        # replace with a linear interpolation between the endpoints.
+        signal = signal.copy()
+        for start, end in interval_list:
+            signal.loc[start:end] = np.nan
+        return signal.interpolate(method='linear', limit_direction='both')
+    else:
+        mask = pd.Series(True, index=signal.index)
+        for start, end in interval_list:
+            mask.loc[start:end] = False
+        return signal[mask].copy()
 
 
 def save_rejected_intervals(signal: 'pd.DataFrame',
@@ -279,28 +279,70 @@ def invalidate_samples(df, start, end):
     return df
 
 
-def smooth(x, fs):
+# def smooth(x, fs):
+#     try:
+#         b = smooth.filter_b
+#     except AttributeError:
+#         b = sig.firwin2(int(fs*8), freq=[0, 0.01, 0.05, fs/2],
+#                         gain=[1.0, 1.0, 0.0001, 0.0], fs=fs)
+#         smooth.filter_b = b
+#     xds = sig.decimate(x, 10, ftype='fir', zero_phase=True)
+#     xf = sig.filtfilt(b, 1, xds)
+#     return sig.resample(xf, x.shape[0])
+def smooth(data):
     try:
         b = smooth.filter_b
     except AttributeError:
-        b = sig.firwin2(int(fs*8), freq=[0, 0.01, 0.05, fs/2],
-                        gain=[1.0, 1.0, 0.0001, 0.0], fs=fs)
+        b = sig.firwin(1001, cutoff=[1], fs=data.attrs['fs'], pass_zero=True)
         smooth.filter_b = b
-    xds = sig.decimate(x, 10, ftype='fir', zero_phase=True)
-    xf = sig.filtfilt(b, 1, xds)
-    return sig.resample(xf, x.shape[0])
+    smoothed = series_like(data, 'smoothed')
+    smoothed[:] = sig.filtfilt(b, 1, data)
+    return smoothed
 
 
-def detrend_hp(x, fs, numtaps=1001):
+def detrend(data, numtaps=1001):
     try:
-        b = detrend_hp.filter_b
+        b = detrend.filter_b
     except AttributeError:
-        # b = sig.firwin2(int(fs*8), freq=[0, 0.1, 0.2, 0.4, fs/2],
-        #                 gain=[0., 1e-7, 0.1, 1., 1.], fs=fs)
-        b = sig.firwin2(numtaps, freq=[0, 0.05, 0.1, fs/2],
-                        gain=[0., 0.001, 1., 1.], fs=fs)
-        detrend_hp.filter_b = b
-    return sig.filtfilt(b, 1, x)
+        b = sig.firwin(numtaps, cutoff=[0.05], fs=data.attrs['fs'],
+                       pass_zero=False)
+        detrend.filter_b = b
+    detrended = series_like(data, 'detrended')
+    detrended[:] = sig.filtfilt(b, 1, data)
+    return detrended
+
+
+def exp_fit(data):
+    exp_func = lambda x, a, b, c: a * np.exp(-b * x) + c
+    popt, pcov = curve_fit(exp_func, data.index, data, maxfev=10000)
+    fit = series_like(data, 'fit')
+    fit[:] = exp_func(data.index.to_numpy(), *popt)
+    return fit
+
+
+def debleach(data):
+    """ Debleach the data by fitting an exponential and subtracting"""
+    exp_func = lambda x, a, b, c: a * np.exp(-b * x) + c
+    popt, pcov = curve_fit(exp_func, data.index, data, maxfev=10000)
+    fit = series_like(data, 'fit')
+    fit[:] = exp_func(data.index.to_numpy(), *popt)
+    return (data - fit) / fit
+
+
+def fit_debleached(data, control):
+    data_lp = smooth(data)
+    control_lp = smooth(control)
+    ols_model = sm.OLS(data_lp, control_lp)
+    return data_lp - ols_model.fit().fittedvalues,
+
+
+def fit(signal):
+    """ Fit the site data to the isobestic channel. """
+    if signal.shape[1] != 2:
+        raise ValueError('Only one channel is supported.')
+    rlm_model = sm.RLM(signal[signal.attrs['channel']],
+                       signal[signal.attrs['iso_channel']])
+    return rlm_model.fit()
 
 
 def normalise(signal, control, mask, fs, method='fit', detrend=True):
@@ -315,7 +357,7 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
     df = signal - signal_fit
     if detrend:
         # Filter with a highpass filter to remove remaining drift
-        df = detrend_hp(df, fs)
+        df = detrend(df, fs)
 
     if method == 'fit':
         dff = df / signal_fit

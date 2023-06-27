@@ -20,6 +20,11 @@ def signal_curve(df, y_dim):
     # return hv.Curve((pd.to_timedelta(df.index, unit='s'), df))
 
 
+def signal_shade(df, y_dim, cmap):
+    return datashade(signal_curve(df, y_dim=y_dim),
+                     aggregator=ds.count(), cmap=cmap)
+
+
 def interval_overlay(intervals, selected=[]):
     if intervals is None or intervals == []:
         return hv.Overlay([])
@@ -130,15 +135,20 @@ class PreprocessDashboard(param.Parameterized):
     @param.depends("selected_index", "interval_update", watch=True)
     def update_regressions(self):
         rej = fp.reject(self.recording, self.intervals)
-        fit = fp.fit(rej)
-        isoch = self.recording.attrs['iso_channel']
         ch = self.recording.attrs['channel']
-        regression = fp.series_like(rej, name='regression')
-        regression[:] = fit.fittedvalues
-        self.regression = regression
+        # We were doing a robust regression, but the fit isn't good enough.
+        # Let's just detrend and divide by the smoothed signal instead.
         dff = fp.series_like(self.recording, name='dff')
-        dff.loc[rej.index] = (rej[ch] - regression) / regression
-        dff = dff / dff.std()
+        dff.loc[rej.index] = fp.detrend(rej[ch])
+        dff = dff / fp.smooth(rej[ch])
+        # OLD REGRESSION CODE
+        # fit = fp.fit(rej)
+        # regression = fp.series_like(rej, name='regression')
+        # regression[:] = fit.fittedvalues
+        # self.regression = regression
+        # dff = fp.series_like(self.recording, name='dff')
+        # dff.loc[rej.index] = (rej[ch] - regression) / regression
+        # dff = dff / dff.std()
         self.dff = dff
         self.regression_update += 1
 
@@ -151,14 +161,14 @@ class PreprocessDashboard(param.Parameterized):
         regression = self.regression
         isoch = self.recording.attrs['iso_channel']
         ch = self.recording.attrs['channel']
-        reg_shade = datashade(
-            signal_curve(regression, y_dim='raw'),
-            aggregator=ds.count(), cmap='green')
+        # reg_shade = datashade(
+        #     signal_curve(regression, y_dim='F'),
+        #     aggregator=ds.count(), cmap='green')
         iso_shade = datashade(
-            signal_curve(self.recording[isoch], y_dim='raw'),
+            signal_curve(self.recording[isoch], y_dim='F'),
             aggregator=ds.count(), cmap='blue')
         sig_shade = datashade(
-            signal_curve(self.recording[ch], y_dim='raw'),
+            signal_curve(self.recording[ch], y_dim='F'),
             aggregator=ds.count(), cmap='red')
         dff_shade = datashade(
             signal_curve(self.dff, y_dim='dF/F'),
@@ -166,7 +176,7 @@ class PreprocessDashboard(param.Parameterized):
         overlay = interval_overlay_map(iso_shade, self.intervals,
                                        self.update_intervals)
         # plot = (rej_shade.opts(xaxis=None) +
-        plot = ((iso_shade * sig_shade * reg_shade * overlay).opts(xaxis=None) +
+        plot = ((iso_shade * sig_shade * overlay).opts(xaxis=None) +
                 dff_shade)
         tools = ['xbox_select']
         plot = plot.opts(
