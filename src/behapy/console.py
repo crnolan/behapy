@@ -2,11 +2,12 @@ import logging
 import argparse
 import glob
 import json
+import numpy as np
 import pandas as pd
 import panel as pn
 from . import medpc
 from pathlib import Path
-from .pathutils import get_recordings
+from .pathutils import get_recordings, get_preprocessed_fibre_path
 from .tdt import load_session_tank_map, convert_block
 from .visuals import PreprocessDashboard
 from . import fp
@@ -122,3 +123,60 @@ def preprocess_dash_command():
                         help='path to the BIDS root')
     args = parser.parse_args()
     preprocess_dash(**vars(args))
+
+
+def preprocess(bidsroot):
+    bidsroot = Path(bidsroot)
+    recordings = pd.DataFrame(get_recordings(bidsroot / 'rawdata'))
+    signals = recordings.loc[:, ['subject', 'session', 'task', 'run', 'label']].drop_duplicates()
+
+    def save_recording(row):
+        intervals = fp.load_rejections(bidsroot, row['subject'],
+                                       row['session'], row['task'],
+                                       row['run'], row['label'])
+        # Check if the recording has rejections saved
+        if intervals is None:
+            logging.info(f'Recording for subject {row.subject}, '
+                         f'session {row.session}, task {row.task}, '
+                         f'run {row.run} and label {row.label} has no '
+                         f'rejections file, skipping.')
+            return False
+        recording = fp.load_signal(bidsroot, row['subject'], row['session'],
+                                   row['task'], row['run'], row['label'],
+                                   'iso')
+        rej = fp.reject(recording, intervals)
+        ch = recording.attrs['channel']
+        # We were doing a robust regression, but the fit isn't good enough.
+        # Let's just detrend and divide by the smoothed signal instead.
+        dff = fp.series_like(recording, name='dff')
+        dff.loc[rej.index] = fp.detrend(rej[ch])
+        dff = dff / fp.smooth(rej[ch])
+        data_fn = get_preprocessed_fibre_path(
+            bidsroot, row['subject'], row['session'], row['task'], row['run'],
+            row['label'], 'npy')
+        meta_fn = get_preprocessed_fibre_path(
+            bidsroot, row['subject'], row['session'], row['task'], row['run'],
+            row['label'], 'json')
+        data_fn.parent.mkdir(parents=True, exist_ok=True)
+        np.save(data_fn, dff.loc[rej.index].reset_index().to_numpy())
+        meta = {
+            'fs': recording.attrs['fs'],
+            'start_time': recording.attrs['start_time']
+        }
+        with open(meta_fn, 'w') as file:
+            json.dump(meta, file)
+        return True
+
+    signals.apply(save_recording, axis=1)
+
+
+def preprocess_command():
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+    parser = argparse.ArgumentParser(
+        description=('Preprocess the dataset from raw data using the rejected '
+                     'intervals')
+    )
+    parser.add_argument('bidsroot', type=str,
+                        help='path to the BIDS root')
+    args = parser.parse_args()
+    preprocess(**vars(args))
