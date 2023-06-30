@@ -12,7 +12,7 @@ import statsmodels.api as sm
 from intervaltree import IntervalTree, Interval
 from numpy.lib.stride_tricks import sliding_window_view
 import bottleneck as bn
-from .pathutils import get_fibre_path, get_recordings, \
+from .pathutils import get_raw_fibre_path, get_recordings, \
     get_rejected_intervals_path
 
 
@@ -27,11 +27,11 @@ def series_like(df, name, default=0.):
     return series
 
 
-def load_channel(base, subject, session, task, run, label, channel):
-    data_fn = get_fibre_path(base, subject, session, task, run, label, channel,
-                             'npy')
-    meta_fn = get_fibre_path(base, subject, session, task, run, label, channel,
-                             'json')
+def load_channel(root, subject, session, task, run, label, channel):
+    data_fn = get_raw_fibre_path(root, subject, session, task, run, label,
+                                 channel, 'npy')
+    meta_fn = get_raw_fibre_path(root, subject, session, task, run, label,
+                                 channel, 'json')
     with open(meta_fn) as file:
         meta = json.load(file)
     data = np.load(data_fn)
@@ -41,7 +41,8 @@ def load_channel(base, subject, session, task, run, label, channel):
 def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
     """Load a raw signal, including the isosbestic channel if present.
     """
-    base = Path(root) / 'rawdata'
+    root = Path(root)
+    base = root / 'rawdata'
     recordings = pd.DataFrame(
         get_recordings(base, subject=subject, session=session, task=task,
                        run=run, label=label))
@@ -69,7 +70,7 @@ def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
     t0 = None
     fs = None
     for r in recordings.itertuples():
-        d, meta = load_channel(base=base,
+        d, meta = load_channel(root=root,
                                subject=r.subject,
                                session=r.session,
                                task=r.task,

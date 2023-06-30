@@ -1,3 +1,4 @@
+from typing import Union
 import logging
 import argparse
 import glob
@@ -8,21 +9,23 @@ import panel as pn
 from . import medpc
 from pathlib import Path
 from .pathutils import get_recordings, get_preprocessed_fibre_path
-from .tdt import load_session_tank_map, convert_block
+from .tdt import load_session_tank_map, load_event_names, convert_block
 from .visuals import PreprocessDashboard
 from . import fp
 
 
-def tdt2bids(session_fn: str, bids_root: str) -> None:
+def tdt2bids(session_fn: str, experiment_fn: str, bids_root: str) -> None:
     """Convert TDT tanks into BIDS format.
 
     Args:
         session_fn: Map of the files to sessions
+        experiment_fn:
         bids_root: Root path of the BIDS structure (data will be put in the
                    `rawdata` sub-folder of `bids_root`)
     """
     session_df = load_session_tank_map(session_fn)
-    convert_block(session_df, Path(bids_root) / 'rawdata')
+    event_names = load_event_names(experiment_fn)
+    convert_block(session_df, Path(bids_root), event_names)
 
 
 def tdt2bids_command():
@@ -31,7 +34,9 @@ def tdt2bids_command():
         description='Convert TDT tanks into BIDS format'
     )
     parser.add_argument('session_fn', type=str,
-                        help='path to file with TDT session information')
+                        help='path to CSV file with TDT session information')
+    parser.add_argument('experiment_fn', type=str,
+                        help='path to JSON file with experiment details')
     parser.add_argument('bids_root', type=str,
                         help='root path of the BIDS dataset (data will '
                              'be put in the rawdata sub-folder of bids_root)')

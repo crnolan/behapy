@@ -8,17 +8,17 @@ def get_session_root(base, sub, ses):
     return Path(base) / 'sub-{sub}/ses-{ses}'.format(sub=sub, ses=ses)
 
 
-def get_events_path(base, sub, ses, task, run):
-    root = get_session_root(base, sub, ses)
+def get_events_path(root, sub, ses, task, run):
+    base = get_session_root(Path(root) / 'rawdata', sub, ses)
     template = 'sub-{sub}_ses-{ses}_task-{task}_run-{run}_events.csv'
-    return root / template.format(sub=sub, ses=ses, task=task, run=run)
+    return base / template.format(sub=sub, ses=ses, task=task, run=run)
 
 
-def get_fibre_path(base, sub, ses, task, run, label, channel, ext):
-    root = get_session_root(base, sub, ses)
+def get_raw_fibre_path(root, sub, ses, task, run, label, channel, ext):
+    base = get_session_root(Path(root) / 'rawdata', sub, ses)
     template = ('fp/sub-{sub}_ses-{ses}_task-{task}_run-{run}_label-{label}_'
                 'channel-{channel}.{ext}')
-    return root / template.format(sub=sub, ses=ses, task=task, run=run,
+    return base / template.format(sub=sub, ses=ses, task=task, run=run,
                                   label=label, channel=channel, ext=ext)
 
 
