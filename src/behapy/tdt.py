@@ -100,7 +100,7 @@ def convert_stream(df, block, root, event_names=None):
 def convert_block(df, root, event_names=None):
     blocks = df.block.unique()
     if len(blocks) > 1:
-        df.groupby('block').apply(convert_block, root)
+        df.groupby('block').apply(convert_block, root, event_names)
     else:
         logging.info('Opening block {}'.format(blocks[0]))
         try:
