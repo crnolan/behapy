@@ -1,0 +1,12 @@
+{
+    "event_names": [
+        "llp",
+        "mag",
+        "rlp",
+        "suc",
+        "pel",
+        "start",
+        "end",
+        "ue0"
+    ]
+}
