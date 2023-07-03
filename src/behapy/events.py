@@ -31,14 +31,14 @@ def load_events(root: Path,
     return events
 
 
-def find_events(events_df: pd.DataFrame,
+def find_events(events: pd.DataFrame,
                 reference: str,
                 source: str,
                 direction: Literal['backward', 'forward'] = 'forward',
                 allow_exact_matches: bool = True) -> pd.Series:
-    rdf = events_df.loc[events_df.value == reference, 'onset'].to_frame()
+    rdf = events.loc[events.value == reference, 'onset'].to_frame()
     rdf = rdf.set_index('onset', drop=False)
-    tdf = events_df.loc[events_df.value == source, 'onset'].to_frame()
+    tdf = events.loc[events.value == source, 'onset'].to_frame()
     tdf = tdf.set_index('onset')
     tdf.index.name = 'source_onset'
     df = pd.merge_asof(tdf, rdf,
@@ -48,3 +48,53 @@ def find_events(events_df: pd.DataFrame,
     df['latency'] = df['onset'] - df['source_onset']
     return (df.loc[:, ['latency', 'onset']].groupby('onset').min())['latency']
 
+
+def _find_nearest(origin, fit):
+    df0 = pd.DataFrame(np.array(origin), index=origin, columns=['origin'])
+    df1 = pd.DataFrame(np.array(fit), index=fit, columns=['fit'])
+    first = pd.merge_asof(df1, df0,
+                          left_index=True, right_index=True,
+                          direction='nearest')
+    second = pd.DataFrame(index=origin, dtype=bool)
+    second['nearest'] = False
+    second.loc[first['origin'], 'nearest'] = True
+    return second['nearest'].to_numpy()
+
+
+def _build_single_regressor(data: pd.DataFrame,
+                            events: pd.Series,
+                            window: Tuple[float, float]) -> \
+                             Tuple[np.ndarray, np.ndarray]:
+    event_mask = np.array(_find_nearest(data.index, events.index))
+    window_indices = np.round(np.array(window) * data.attrs['fs']).astype(int)
+    offsets = np.arange(*window_indices)
+    matrix = np.zeros((data.shape[0], offsets.shape[0]))
+    for i, offset in enumerate(offsets):
+        if offset < 0:
+            matrix[:offset, i] = event_mask[-offset:]
+        elif offset > 0:
+            matrix[offset:, i] = event_mask[:-offset]
+        else:
+            matrix[:, i] = event_mask
+    return matrix, offsets
+
+
+def build_design_matrix(data: pd.DataFrame,
+                        events: pd.DataFrame,
+                        window: Tuple[float, float]) -> pd.DataFrame:
+    regressor_dfs = []
+    for event in events.value.unique():
+        matrix, offsets = _build_single_regressor(
+            data, events.loc[events.value == event], window=window)
+        column_index = pd.MultiIndex.from_product(
+            [[event], offsets/data.attrs['fs']], names=('event', 'offset'))
+        _df = pd.DataFrame(matrix, dtype=bool, index=data.index,
+                           columns=column_index)
+        regressor_dfs.append(_df)
+    return pd.concat(regressor_dfs, axis=1)
+
+
+def regress(data: pd.DataFrame,
+            design_matrix: pd.DataFrame,
+            min_events=50) -> pd.Series:
+    pass
