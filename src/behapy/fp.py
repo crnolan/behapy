@@ -13,7 +13,7 @@ from intervaltree import IntervalTree, Interval
 from numpy.lib.stride_tricks import sliding_window_view
 import bottleneck as bn
 from .pathutils import get_raw_fibre_path, get_recordings, \
-    get_rejected_intervals_path
+    get_rejected_intervals_path, get_preprocessed_fibre_path
 
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
@@ -41,7 +41,7 @@ def load_channel(root, subject, session, task, run, label, channel):
 def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
     """Load a raw signal, including the isosbestic channel if present.
     """
-    root = Path(root)
+    root = Path(root).absolute()
     base = root / 'rawdata'
     recordings = pd.DataFrame(
         get_recordings(base, subject=subject, session=session, task=task,
@@ -239,17 +239,19 @@ def reject(signal, intervals, fill=False):
     """ Filter the site data to remove the specified intervals. """
     intervals.merge_overlaps()
     interval_list = [(i[0], i[1]) for i in list(intervals)]
+    mask = pd.Series(True, index=signal.index)
+    for start, end in interval_list:
+        mask.loc[start:end] = False
     if fill:
         # Return a copy of the signal with the rejected intervals
         # replace with a linear interpolation between the endpoints.
         signal = signal.copy()
         for start, end in interval_list:
             signal.loc[start:end] = np.nan
-        return signal.interpolate(method='linear', limit_direction='both')
+        signal = signal.interpolate(method='linear', limit_direction='both')
+        signal['mask'] = mask
+        return signal
     else:
-        mask = pd.Series(True, index=signal.index)
-        for start, end in interval_list:
-            mask.loc[start:end] = False
         return signal[mask].copy()
 
 
@@ -374,15 +376,54 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
         raise ValueError("Unrecognised normalisation method {}".format(method))
 
 
-def collect_tdt_events(raw, events):
-    ts = np.array([])
-    keys = np.array([])
-    event_map = map_events(events)
-    for key in raw.epocs.keys() & event_map.keys():
-        ts = np.append(ts, raw.epocs[key].onset)
-        keys = np.append(keys, [key] * len(raw.epocs[key].onset))
-    order = np.argsort(ts)
-    return ts[order], keys[order]
+def preprocess(root, subject, session, task, run, label):
+    intervals = load_rejections(root, subject, session, task, run, label)
+    # Check if the recording has rejections saved
+    if intervals is None:
+        logging.info(f'Recording for subject {subject}, '
+                     f'session {session}, task {task}, '
+                     f'run {run} and label {label} has no '
+                     f'rejections file, skipping.')
+        return False
+    recording = load_signal(root, subject, session, task, run, label, 'iso')
+    recording = downsample(recording, 64)
+    rej = reject(recording, intervals, fill=True)
+    ch = recording.attrs['channel']
+    # We were doing a robust regression, but the fit isn't good enough.
+    # Let's just detrend and divide by the smoothed signal instead.
+    # dff = fp.series_like(recording, name='dff')
+    # dff.loc[rej.index] = fp.detrend(rej[ch])
+    dff = detrend(rej[ch])
+    dff = dff / smooth(rej[ch])
+    dff.name = 'dff'
+    dff = dff.to_frame()
+    dff['mask'] = rej['mask']
+    data_fn = get_preprocessed_fibre_path(
+        root, subject, session, task, run, label, 'parquet')
+    meta_fn = get_preprocessed_fibre_path(
+        root, subject, session, task, run, label, 'json')
+    data_fn.parent.mkdir(parents=True, exist_ok=True)
+    dff.to_parquet(data_fn)
+    meta = dff.attrs
+    meta['root'] = str(root)
+    with open(meta_fn, 'w') as file:
+        json.dump(meta, file)
+    return True
+
+
+def load_preprocessed(root, subject, session, task, run, label):
+    root = Path(root)
+    data_fn = get_preprocessed_fibre_path(
+        root, subject, session, task, run, label, 'parquet')
+    meta_fn = get_preprocessed_fibre_path(
+        root, subject, session, task, run, label, 'json')
+    if not data_fn.exists():
+        return None
+    data = pd.read_parquet(data_fn)
+    with open(meta_fn, 'r') as file:
+        meta = json.load(file)
+    data.attrs.update(meta)
+    return data
 
 
 def epoch_events(data: Iterable[float],

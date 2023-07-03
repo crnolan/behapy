@@ -1,4 +1,4 @@
-from typing import Tuple, Iterable
+from typing import Tuple, Iterable, Literal
 from pathlib import Path
 import json
 import logging
@@ -31,32 +31,20 @@ def load_events(root: Path,
     return events
 
 
-# def find_events_within(events_df: pd.DataFrame,
-#                        reference: str,
-#                        target: str,
-#                        direction: str = 'forward',
-#                        tmin: float = 0.,
-#                        tmax: float = np.inf) -> pd.Series:
-#     ref = pd.Series(index=events_df.value == reference
-#     # Inputs need to be Series with timestamps
-#     event1_mask.name = 'src'
-#     event2_mask.name = 'dest'
-#     df1 = pd.DataFrame(index=event1_mask.index[event1_mask])
-#     df1.index.name = 'onset'
-#     # Subtract or add one microsecond to ensure the same event isn't
-#     # detected as following or preceding itself (if the same event train
-#     # is passed in)
-#     if allow_simultaneous:
-#         offset = 0
-#     else:
-#         offset = -1e-6 if direction == 'forward' else 1e-6
-#     df2 = pd.DataFrame(event2_mask.index[event2_mask].to_numpy(),
-#                        index=(event2_mask.index[event2_mask] + offset),
-#                        columns=['indices'])
-#     merged = pd.merge_asof(df1, df2,
-#                            left_index=True, right_index=True,
-#                            direction=direction).reset_index()
-#     merged = merged[(merged.indices - merged.onset).abs() < tmax]
-#     series = pd.Series([False]*len(event2_mask), index=event2_mask.index)
-#     series.loc[merged.indices[~merged.indices.isna()]] = True
-#     return series.to_numpy()
+def find_events(events_df: pd.DataFrame,
+                reference: str,
+                source: str,
+                direction: Literal['backward', 'forward'] = 'forward',
+                allow_exact_matches: bool = True) -> pd.Series:
+    rdf = events_df.loc[events_df.value == reference, 'onset'].to_frame()
+    rdf = rdf.set_index('onset', drop=False)
+    tdf = events_df.loc[events_df.value == source, 'onset'].to_frame()
+    tdf = tdf.set_index('onset')
+    tdf.index.name = 'source_onset'
+    df = pd.merge_asof(tdf, rdf,
+                       left_index=True, right_index=True,
+                       direction=direction,
+                       allow_exact_matches=allow_exact_matches).dropna().reset_index()
+    df['latency'] = df['onset'] - df['source_onset']
+    return (df.loc[:, ['latency', 'onset']].groupby('onset').min())['latency']
+
