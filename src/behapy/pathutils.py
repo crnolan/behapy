@@ -72,10 +72,10 @@ def list_raw(root, subject='*', session='*', task='*', run='*', label='*'):
 
 def list_preprocessed(root, subject='*', session='*', task='*', run='*',
                       label='*'):
-    Recording = namedtuple("Recording", ["subject", "session", "task", "run", "label", "channel", "file_path"])
+    Recording = namedtuple("Recording", ["subject", "session", "task", "run", "label", "file_path"])
 
     # Set the pattern for the data files
-    base = Path(root) / 'derivatives/preprocessed'
+    base = Path(root) / 'derivatives/preprocess'
     pattern = (f'sub-{subject}/ses-{session}/fp/'
                f'sub-{subject}_ses-{session}_'
                f'task-{task}_run-{run}_label-{label}.parquet')
@@ -83,18 +83,17 @@ def list_preprocessed(root, subject='*', session='*', task='*', run='*',
     data_files = list(base.glob(str(pattern)))
     # Regex pattern to extract variables from the file names
     regex_pattern = (r"sub-([^_]+)_ses-([^_]+)_task-([^_]+)_run-([^_]+)_"
-                     r"label-([^_]+)_channel-([^_]+)\.parquet")
+                     r"label-([^_]+)\.parquet")
     # Extract variables from the file names and store them in a list of namedtuples
     extracted_data = []
     for file_path in data_files:
         match = re.search(regex_pattern, str(file_path.name))
         if match:
-            sub, ses, task, run, lab, channel = match.groups()
-            data_file = Recording(sub, ses, task, run, lab, channel, file_path)
+            sub, ses, task, run, lab = match.groups()
+            data_file = Recording(sub, ses, task, run, lab, file_path)
             extracted_data.append(data_file)
 
     return extracted_data
-
 
 
 def get_session_meta_path(root):
