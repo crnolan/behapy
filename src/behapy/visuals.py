@@ -134,13 +134,16 @@ class PreprocessDashboard(param.Parameterized):
 
     @param.depends("selected_index", "interval_update", watch=True)
     def update_regressions(self):
-        rej = fp.reject(self.recording, self.intervals)
+        rej = fp.reject(self.recording, self.intervals, fill=True)
         ch = self.recording.attrs['channel']
         # We were doing a robust regression, but the fit isn't good enough.
         # Let's just detrend and divide by the smoothed signal instead.
-        dff = fp.series_like(self.recording, name='dff')
-        dff.loc[rej.index] = fp.detrend(rej[ch])
-        dff = dff / fp.smooth(rej[ch])
+        dff = detrend(rej[ch])
+        dff = dff / smooth(rej[ch])
+        dff.name = 'dff'
+        # dff = fp.series_like(self.recording, name='dff')
+        # dff.loc[rej.index] = fp.detrend(rej[ch])
+        # dff = dff / fp.smooth(rej[ch])
         # OLD REGRESSION CODE
         # fit = fp.fit(rej)
         # regression = fp.series_like(rej, name='regression')

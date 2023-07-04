@@ -12,7 +12,7 @@ import statsmodels.api as sm
 from intervaltree import IntervalTree, Interval
 from numpy.lib.stride_tricks import sliding_window_view
 import bottleneck as bn
-from .pathutils import get_raw_fibre_path, get_recordings, \
+from .pathutils import get_raw_fibre_path, list_raw, \
     get_rejected_intervals_path, get_preprocessed_fibre_path
 
 
@@ -42,10 +42,9 @@ def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
     """Load a raw signal, including the isosbestic channel if present.
     """
     root = Path(root).absolute()
-    base = root / 'rawdata'
     recordings = pd.DataFrame(
-        get_recordings(base, subject=subject, session=session, task=task,
-                       run=run, label=label))
+        list_raw(root, subject=subject, session=session, task=task,
+                 run=run, label=label))
     subjects = recordings.loc[:, 'subject'].unique()
     sessions = recordings.loc[:, 'session'].unique()
     tasks = recordings.loc[:, 'task'].unique()
@@ -385,6 +384,9 @@ def preprocess(root, subject, session, task, run, label):
                      f'run {run} and label {label} has no '
                      f'rejections file, skipping.')
         return False
+    logging.info(f'Preprocessing subject {subject}, '
+                 f'session {session}, task {task}, '
+                 f'run {run}, label {label}...')
     recording = load_signal(root, subject, session, task, run, label, 'iso')
     recording = downsample(recording, 64)
     rej = reject(recording, intervals, fill=True)

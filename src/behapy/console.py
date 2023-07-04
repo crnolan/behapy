@@ -8,7 +8,7 @@ import pandas as pd
 import panel as pn
 from . import medpc
 from pathlib import Path
-from .pathutils import get_recordings, get_preprocessed_fibre_path
+from .pathutils import list_raw, get_preprocessed_fibre_path
 from .tdt import load_session_tank_map, load_event_names, convert_block
 from .visuals import PreprocessDashboard
 from . import fp
@@ -106,7 +106,7 @@ def medpc2csv_command():
 
 def preprocess_dash(bidsroot):
     bidsroot = Path(bidsroot)
-    recordings = pd.DataFrame(get_recordings(bidsroot / 'rawdata'))
+    recordings = pd.DataFrame(list_raw(bidsroot))
     signals = recordings.loc[:, ['subject', 'session', 'task', 'run', 'label']].drop_duplicates()
 
     def get_recording(index):
@@ -132,7 +132,7 @@ def preprocess_dash_command():
 
 def preprocess(bidsroot):
     bidsroot = Path(bidsroot)
-    recordings = pd.DataFrame(get_recordings(bidsroot / 'rawdata'))
+    recordings = pd.DataFrame(list_raw(bidsroot))
     signals = recordings.loc[:, ['subject', 'session', 'task', 'run', 'label']].drop_duplicates()
 
     def save_recording(row):

@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import behapy.fp as fp
-from behapy.pathutils import get_recordings, get_session_meta_path
+from behapy.pathutils import list_raw, get_session_meta_path
 import statsmodels.api as sm
 import scipy.signal as sig
 from intervaltree import IntervalTree, Interval
@@ -24,7 +24,7 @@ RAWROOT = BIDSROOT / 'rawdata'
 ANALROOT = BIDSROOT / 'derivatives/ds64'
 
 # %%
-recordings = pd.DataFrame(get_recordings(RAWROOT))
+recordings = pd.DataFrame(list_raw(BIDSROOT))
 sites = recordings.loc[:, ['subject', 'session', 'task', 'run', 'label']].drop_duplicates()
 
 
