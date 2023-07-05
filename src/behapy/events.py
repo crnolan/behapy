@@ -28,6 +28,7 @@ def load_events(root: Path,
     if not events_path.exists():
         raise ValueError(f'Events file {events_path} does not exist')
     events = pd.read_csv(events_path, index_col=0)
+    events.index = pd.to_timedelta(events.index, unit='s')
     return events
 
 
@@ -91,10 +92,18 @@ def build_design_matrix(data: pd.DataFrame,
         _df = pd.DataFrame(matrix, dtype=bool, index=data.index,
                            columns=column_index)
         regressor_dfs.append(_df)
-    return pd.concat(regressor_dfs, axis=1)
+    df = pd.concat(regressor_dfs, axis=1)
+    df = df.loc[data['mask'], :]
+    return df.loc[df.sum(axis=1) > 0, :]
 
 
-def regress(data: pd.DataFrame,
-            design_matrix: pd.DataFrame,
+def regress(design_matrix: pd.DataFrame,
+            data: pd.DataFrame,
             min_events=50) -> pd.Series:
-    pass
+    dm = design_matrix.loc[:, design_matrix.sum() > min_events]
+    if dm.empty:
+        return pd.Series(dtype=float, index=dm.columns)
+    print(data.shape, dm.shape)
+    lr = sm.OLS(data.to_numpy(), dm.to_numpy()).fit()
+    return pd.Series(lr.params, index=dm.columns)
+

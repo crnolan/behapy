@@ -422,6 +422,9 @@ def load_preprocessed(root, subject, session, task, run, label):
     if not data_fn.exists():
         return None
     data = pd.read_parquet(data_fn)
+    if data.index.name != 'time':
+        data.index = pd.to_timedelta(data.index, unit='s')
+        data.index.name = 'time'
     with open(meta_fn, 'r') as file:
         meta = json.load(file)
     data.attrs.update(meta)
