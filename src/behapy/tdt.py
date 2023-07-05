@@ -66,7 +66,7 @@ def get_epoch_df(epoch, event_names=None):
     })
     df['duration'] = df.offset - df.onset
     df = df.loc[:, ['onset', 'duration', 'value']].sort_values(by='onset')
-    return df.reset_index(drop=True)
+    return df.set_index('onset')
 
 
 def convert_stream(df, block, root, event_names=None):
