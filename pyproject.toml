@@ -1,3 +1,25 @@
 [build-system]
-requires = ["setuptools>=42"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "behapy"
+version = "0.0.3"
+authors = [{name="Chris Nolan", email="cnolan@gmail.com"}]
+description = "Behavioural neuroscience data wrangling and analysis tools"
+readme = "README.md"
+dependencies = ["pandas"]
+requires-python = ">=3.8"
+license = {text = "GNU General Public License v3 (GPLv3)"}
+classifiers = [
+    "Programming Language :: Python :: 3"
+]
+[project.scripts]
+tdt2bids = "behapy.console:tdt2bids_command"
+medpc2csv = "behapy.console:medpc2csv_command"
+ppd = "behapy.console:preprocess_dash_command"
+preprocess = "behapy.console:preprocess_command"
+
+[project.urls]
+"Homepage" = "https://github.com/crnolan/behapy"
+"Bug Tracker" = "https://github.com/crnolan/behapy/issues"

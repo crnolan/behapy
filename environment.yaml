@@ -1,8 +1,18 @@
 name: behapy
 dependencies:
   - python>=3.8
+  - pip
   - numpy
   - pandas
+  - statsmodels
   - matplotlib
   - seaborn
+  - intervaltree
+  - bokeh
+  - jupyter_bokeh
+  - holoviews
+  - datashader
+  - pyarrow
+  - pip:
+    - tdt
 
