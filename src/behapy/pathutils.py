@@ -48,11 +48,9 @@ def list_recordings(base, subject='*', session='*', task='*', run='*', label='*'
                f'task-{task}_run-{run}_label-{label}_channel-*.{ext}')
     # Search for files that match the pattern
     data_files = list(base.glob(str(pattern)))
-    print(data_files)
     # Regex pattern to extract variables from the file names
     regex_pattern = (r"sub-([^_]+)_ses-([^_]+)_task-([^_]+)_run-([^_]+)_"
                      r"label-([^_]+)_channel-([^_]+)\.") + ext
-    print(regex_pattern)
     # Extract variables from the file names and store them in a list of namedtuples
     extracted_data = []
     for file_path in data_files:
