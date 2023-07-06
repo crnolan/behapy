@@ -13,7 +13,7 @@ sns.set_theme()
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 # %%
-BIDSROOT = Path('/scratch/cnolan/TB006')
+BIDSROOT = Path('..')
 recordings = pd.DataFrame(list_preprocessed(BIDSROOT))
 
 
@@ -70,5 +70,6 @@ s1.name = 'beta'
 s1 = s1.reset_index()
 s1['event_type'] = s1.event.map({v: k for k, l in plot_meta.items() for v in l})
 sns.relplot(data=s1, x='offset', y='beta', hue='event', row='event_type',
-            kind='line', hue_order=sum(plot_meta.values(), []))
+            kind='line', hue_order=sum(plot_meta.values(), []), aspect=2)
+
 # %%

@@ -1,16 +1,14 @@
 from functools import partial
-from intervaltree import Interval, IntervalTree
+from intervaltree import Interval
 from . import fp
 import pandas as pd
 import holoviews as hv
 from holoviews import opts
 import datashader as ds
-from holoviews.operation.datashader import datashade, dynspread, rasterize
+from holoviews.operation.datashader import datashade
 import holoviews.streams as streams
 import panel as pn
 import param
-from bokeh.models import ColumnDataSource
-from bokeh.plotting import figure
 pn.extension('tabulator', comms='vscode')
 # pn.extension('tabulator')
 
@@ -138,8 +136,8 @@ class PreprocessDashboard(param.Parameterized):
         ch = self.recording.attrs['channel']
         # We were doing a robust regression, but the fit isn't good enough.
         # Let's just detrend and divide by the smoothed signal instead.
-        dff = detrend(rej[ch])
-        dff = dff / smooth(rej[ch])
+        dff = fp.detrend(rej[ch])
+        dff = dff / fp.smooth(rej[ch])
         dff.name = 'dff'
         # dff = fp.series_like(self.recording, name='dff')
         # dff.loc[rej.index] = fp.detrend(rej[ch])
@@ -159,14 +157,9 @@ class PreprocessDashboard(param.Parameterized):
     def plot_all(self):
         if self.recording is None:
             return
-        # rej_shade = rejection_shade(self.recording, self.intervals,
-        #                             self.update_intervals)
         regression = self.regression
         isoch = self.recording.attrs['iso_channel']
         ch = self.recording.attrs['channel']
-        # reg_shade = datashade(
-        #     signal_curve(regression, y_dim='F'),
-        #     aggregator=ds.count(), cmap='green')
         iso_shade = datashade(
             signal_curve(self.recording[isoch], y_dim='F'),
             aggregator=ds.count(), cmap='blue')

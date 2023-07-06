@@ -281,16 +281,6 @@ def invalidate_samples(df, start, end):
     return df
 
 
-# def smooth(x, fs):
-#     try:
-#         b = smooth.filter_b
-#     except AttributeError:
-#         b = sig.firwin2(int(fs*8), freq=[0, 0.01, 0.05, fs/2],
-#                         gain=[1.0, 1.0, 0.0001, 0.0], fs=fs)
-#         smooth.filter_b = b
-#     xds = sig.decimate(x, 10, ftype='fir', zero_phase=True)
-#     xf = sig.filtfilt(b, 1, xds)
-#     return sig.resample(xf, x.shape[0])
 def smooth(data):
     try:
         b = smooth.filter_b
