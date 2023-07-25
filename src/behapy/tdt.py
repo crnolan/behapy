@@ -62,10 +62,10 @@ def get_epoch_df(epoch, event_names=None):
     df = pd.DataFrame({
         'onset': np.concatenate(event_onsets),
         'offset': np.concatenate(event_offsets),
-        'value': np.concatenate(event_id)
+        'event_id': np.concatenate(event_id)
     })
     df['duration'] = df.offset - df.onset
-    df = df.loc[:, ['onset', 'duration', 'value']].sort_values(by='onset')
+    df = df.loc[:, ['onset', 'duration', 'event_id']].sort_values(by='onset')
     return df.set_index('onset')
 
 

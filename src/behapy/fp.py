@@ -403,7 +403,7 @@ def preprocess(root, subject, session, task, run, label):
     return True
 
 
-def load_preprocessed(root, subject, session, task, run, label):
+def load_preprocessed_fibre(root, subject, session, task, run, label):
     root = Path(root)
     data_fn = get_preprocessed_fibre_path(
         root, subject, session, task, run, label, 'parquet')

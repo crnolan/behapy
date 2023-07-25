@@ -36,18 +36,43 @@ def find_events(events: pd.DataFrame,
                 reference: str,
                 source: str,
                 direction: Literal['backward', 'forward'] = 'forward',
-                allow_exact_matches: bool = True) -> pd.Series:
-    rdf = events.loc[events.value == reference, 'onset'].to_frame()
+                allow_exact_matches: bool = True) -> pd.DataFrame:
+    """Find events relative to other events and return their latencies.
+
+    Args:
+        events (pd.DataFrame): events DataFrame
+        reference (str): event of interest
+        source (str): event by which to filter the reference event
+        direction (Literal['backward', 'forward']):
+            direction of the reference event _from_ the source event
+        allow_exact_matches (bool):
+            whether to allow exact time matches
+    """
+    groups = events.groupby(['subject', 'session', 'task', 'run'])
+    if len(groups) > 1:
+        return groups.apply(find_events,
+                            reference=reference,
+                            source=source,
+                            direction=direction,
+                            allow_exact_matches=allow_exact_matches)
+    # rdf = events.loc[events.event_id == reference, 'onset'].to_frame()
+    # rdf = rdf.set_index('onset', drop=False)
+    rdf = events.droplevel(['subject', 'session', 'task', 'run'])
+    rdf = rdf.loc[rdf.event_id == reference, :].reset_index()
     rdf = rdf.set_index('onset', drop=False)
-    tdf = events.loc[events.value == source, 'onset'].to_frame()
-    tdf = tdf.set_index('onset')
-    tdf.index.name = 'source_onset'
+    # tdf = events.loc[events.event_id == source, 'onset'].to_frame()
+    # tdf = tdf.set_index('onset')
+    tdf = pd.DataFrame(index=events.loc[events.event_id == source, :].index)
+    tdf = tdf.droplevel(['subject', 'session', 'task', 'run'])
+    tdf.index = tdf.index.set_names('source_onset')
+    if len(tdf) == 0 or len(rdf) == 0:
+        return pd.DataFrame(columns=['onset', 'duration', 'latency']).set_index('onset')
     df = pd.merge_asof(tdf, rdf,
                        left_index=True, right_index=True,
                        direction=direction,
                        allow_exact_matches=allow_exact_matches).dropna().reset_index()
     df['latency'] = df['onset'] - df['source_onset']
-    return (df.loc[:, ['latency', 'onset']].groupby('onset').min())['latency']
+    return (df.loc[:, ['duration', 'latency', 'onset']].groupby('onset').min())
 
 
 def _find_nearest(origin, fit):
@@ -84,9 +109,9 @@ def build_design_matrix(data: pd.DataFrame,
                         events: pd.DataFrame,
                         window: Tuple[float, float]) -> pd.DataFrame:
     regressor_dfs = []
-    for event in events.value.unique():
+    for event in events.event_id.unique():
         matrix, offsets = _build_single_regressor(
-            data, events.loc[events.value == event], window=window)
+            data, events.loc[events.event_id == event], window=window)
         column_index = pd.MultiIndex.from_product(
             [[event], offsets/data.attrs['fs']], names=('event', 'offset'))
         _df = pd.DataFrame(matrix, dtype=bool, index=data.index,
