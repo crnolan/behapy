@@ -1,6 +1,9 @@
 name: behapy
+channels:
+  - conda-forge
+  - defaults
 dependencies:
-  - python>=3.8
+  - python
   - pip
   - numpy
   - pandas
@@ -8,9 +11,9 @@ dependencies:
   - matplotlib
   - seaborn
   - intervaltree
-  - bokeh
+  - bokeh==2.4.3
   - jupyter_bokeh
-  - holoviews
+  - holoviews==1.15.4
   - datashader
   - pyarrow
   - pip:
