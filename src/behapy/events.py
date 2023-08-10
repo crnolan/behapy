@@ -48,6 +48,8 @@ def find_events(events: pd.DataFrame,
         allow_exact_matches (bool):
             whether to allow exact time matches
     """
+    reference = [reference] if isinstance(reference, str) else reference
+    source = [source] if isinstance(source, str) else source
     groups = events.groupby(['subject', 'session', 'task', 'run'])
     if len(groups) > 1:
         return groups.apply(find_events,
@@ -58,11 +60,11 @@ def find_events(events: pd.DataFrame,
     # rdf = events.loc[events.event_id == reference, 'onset'].to_frame()
     # rdf = rdf.set_index('onset', drop=False)
     rdf = events.droplevel(['subject', 'session', 'task', 'run'])
-    rdf = rdf.loc[rdf.event_id == reference, :].reset_index()
+    rdf = rdf.loc[rdf.event_id.isin(reference), :].reset_index()
     rdf = rdf.set_index('onset', drop=False)
     # tdf = events.loc[events.event_id == source, 'onset'].to_frame()
     # tdf = tdf.set_index('onset')
-    tdf = pd.DataFrame(index=events.loc[events.event_id == source, :].index)
+    tdf = pd.DataFrame(index=events.loc[events.event_id.isin(source), :].index)
     tdf = tdf.droplevel(['subject', 'session', 'task', 'run'])
     tdf.index = tdf.index.set_names('source_onset')
     if len(tdf) == 0 or len(rdf) == 0:
