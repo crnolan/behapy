@@ -16,6 +16,7 @@ dependencies:
   - holoviews==1.15.4
   - datashader
   - pyarrow
+  - bottleneck
   - pip:
     - tdt
 

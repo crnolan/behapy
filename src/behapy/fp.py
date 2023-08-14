@@ -173,13 +173,17 @@ def find_discontinuities(signal, mean_window=3, std_window=30, nstd_thresh=2):
     # characteristic STD.
     std_n = int(signal.attrs['fs'] * std_window)
     # iso_rstds = np.std(sliding_window_view(site.iso(), std_n), axis=-1)
-    data = signal[signal.attrs['iso_channel']].to_numpy()
-    iso_rstds = bn.move_std(data, std_n, axis=-1)
-    thresh = np.median(iso_rstds[~np.isnan(iso_rstds)], axis=-1)
-    mean_thresh = thresh * nstd_thresh
+    data = signal[signal.attrs['channel']].to_numpy()
+    data_rstds = bn.move_std(data, std_n, axis=-1)
+    data_thresh = np.median(data_rstds[~np.isnan(data_rstds)], axis=-1)
+    data_rmeans = bn.move_mean(np.pad(data, n, 'edge'), n, axis=-1)
+    iso = signal[signal.attrs['iso_channel']].to_numpy()
+    iso_rstds = bn.move_std(iso, std_n, axis=-1)
+    iso_thresh = np.median(iso_rstds[~np.isnan(iso_rstds)], axis=-1)
+    mean_thresh = iso_thresh * nstd_thresh
     # Calculate a sliding mean
     # iso_rmeans = np.mean(sliding_window_view(np.pad(site.iso(), n, 'edge'), n), axis=-1)
-    iso_rmeans = bn.move_mean(np.pad(data, n, 'edge'), n, axis=-1)
+    iso_rmeans = bn.move_mean(np.pad(iso, n, 'edge'), n, axis=-1)
     d = (iso_rmeans[n:-n] - iso_rmeans[(n*2):])
     d_thresh = np.abs(d) > mean_thresh
     # Find the start and end of each mean shift
@@ -199,14 +203,15 @@ def find_discontinuities(signal, mean_window=3, std_window=30, nstd_thresh=2):
         pass
     # For each shift, adjust the bounds by searching from the opposite
     # bound and looking for the first time the signal (rather than the
-    # mean) is within the threshold bounds.
+    # mean) is within the threshold bounds. Use the real signal in this
+    # case rather than the isosbestic channel.
     onsets = np.where(mean_shift_bounds == 1)[0]
     offsets = np.where(mean_shift_bounds == -1)[0]
     for i, (onset, offset) in enumerate(zip(onsets, offsets)):
-        k = np.argmax(np.abs(data[offset:onset:-1] - iso_rmeans[onset+n]) < thresh)
+        k = np.argmax(np.abs(data[offset:onset:-1] - data_rmeans[onset+n]) < data_thresh)
         if k > 0:
             onsets[i] = offset - k
-        k = np.argmax(np.abs(data[onset:offset:1] - iso_rmeans[offset+n]) < thresh)
+        k = np.argmax(np.abs(data[onset:offset:1] - data_rmeans[offset+n]) < data_thresh)
         if k > 0:
             offsets[i] = onset + k
     return [(onset, offset)
@@ -218,7 +223,8 @@ def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
                      nstd_thresh=2):
     bounds = find_discontinuities(signal, mean_window=mean_window,
                                   std_window=std_window, nstd_thresh=nstd_thresh)
-    data = signal[signal.attrs['iso_channel']].to_numpy()
+    # data = signal[signal.attrs['iso_channel']].to_numpy()
+    data = signal[signal.attrs['channel']].to_numpy()
     ts = signal.index.to_numpy()
     std_n = int(signal.attrs['fs'] * std_window)
     data_rstds = bn.move_std(data, std_n, axis=-1)
