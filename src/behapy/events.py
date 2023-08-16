@@ -1,4 +1,4 @@
-from typing import Tuple, Iterable, Literal
+from typing import Tuple, Iterable, Literal, Union
 from pathlib import Path
 import json
 import logging
@@ -32,9 +32,47 @@ def load_events(root: Path,
     return events
 
 
+def _find_events(events: pd.DataFrame,
+                 reference: Union[str, Iterable[str]],
+                 source: Union[str, Iterable[str]],
+                 include: Iterable[str] = [],
+                 direction: Literal['backward', 'forward'] = 'forward',
+                 allow_exact_matches: bool = True) -> pd.DataFrame:
+    reference = [reference] if isinstance(reference, str) else reference
+    source = [source] if isinstance(source, str) else source
+    include = include + source
+    index_cols = [n for n in events.index.names
+                    if n in (set(events.index.names) - {'onset'})]
+    rdf = events.droplevel(index_cols)
+    rdf = rdf.loc[rdf.event_id.isin(reference), :].reset_index()
+    rdf = rdf.set_index('onset', drop=False)
+    # tdf = pd.DataFrame(index=events.loc[events.event_id.isin(source), :].index)
+    # tdf = tdf.droplevel(index_cols)
+    tdf = events.droplevel(index_cols)
+    tdf = tdf.loc[tdf.event_id.isin(include), ['event_id']]
+    tdf.rename(columns={'event_id': 'source_event_id'}, inplace=True)
+    tdf.index = tdf.index.set_names('source_onset')
+    if len(tdf) == 0 or len(rdf) == 0:
+        return pd.DataFrame(columns=['onset', 'duration', 'latency']).set_index('onset')
+    df = pd.merge_asof(tdf, rdf,
+                       left_index=True, right_index=True,
+                       direction=direction,
+                       allow_exact_matches=allow_exact_matches).dropna().reset_index()
+    if direction == 'forward':
+        df['latency'] = df['onset'] - df['source_onset']
+    else:
+        df['latency'] = df['source_onset'] - df['onset']
+    # I'm sure this can be done in a quicker and neater way
+    df2 = df.set_index('onset').groupby('onset', group_keys=False).apply(
+        lambda x: x.loc[x.latency == x.latency.min()])
+    # Add the group keys back
+    return df2.loc[df2.source_event_id.isin(source), ['duration', 'latency']]
+
+
 def find_events(events: pd.DataFrame,
-                reference: str,
-                source: str,
+                reference: Union[str, Iterable[str]],
+                source: Union[str, Iterable[str]],
+                include: Iterable[str] = [],
                 direction: Literal['backward', 'forward'] = 'forward',
                 allow_exact_matches: bool = True) -> pd.DataFrame:
     """Find events relative to other events and return their latencies.
@@ -43,38 +81,21 @@ def find_events(events: pd.DataFrame,
         events (pd.DataFrame): events DataFrame
         reference (str): event of interest
         source (str): event by which to filter the reference event
+        include (Iterable[str]): events that can act as interrupting events
+            between source and reference events
         direction (Literal['backward', 'forward']):
             direction of the reference event _from_ the source event
         allow_exact_matches (bool):
             whether to allow exact time matches
     """
-    reference = [reference] if isinstance(reference, str) else reference
-    source = [source] if isinstance(source, str) else source
-    groups = events.groupby(['subject', 'session', 'task', 'run'])
-    if len(groups) > 1:
-        return groups.apply(find_events,
-                            reference=reference,
-                            source=source,
-                            direction=direction,
-                            allow_exact_matches=allow_exact_matches)
-    # rdf = events.loc[events.event_id == reference, 'onset'].to_frame()
-    # rdf = rdf.set_index('onset', drop=False)
-    rdf = events.droplevel(['subject', 'session', 'task', 'run'])
-    rdf = rdf.loc[rdf.event_id.isin(reference), :].reset_index()
-    rdf = rdf.set_index('onset', drop=False)
-    # tdf = events.loc[events.event_id == source, 'onset'].to_frame()
-    # tdf = tdf.set_index('onset')
-    tdf = pd.DataFrame(index=events.loc[events.event_id.isin(source), :].index)
-    tdf = tdf.droplevel(['subject', 'session', 'task', 'run'])
-    tdf.index = tdf.index.set_names('source_onset')
-    if len(tdf) == 0 or len(rdf) == 0:
-        return pd.DataFrame(columns=['onset', 'duration', 'latency']).set_index('onset')
-    df = pd.merge_asof(tdf, rdf,
-                       left_index=True, right_index=True,
-                       direction=direction,
-                       allow_exact_matches=allow_exact_matches).dropna().reset_index()
-    df['latency'] = df['onset'] - df['source_onset']
-    return (df.loc[:, ['duration', 'latency', 'onset']].groupby('onset').min())
+    index_cols = [n for n in events.index.names
+                    if n in (set(events.index.names) - {'onset'})]
+    groups = events.groupby(index_cols)
+    return groups.apply(_find_events,
+                        reference=reference,
+                        source=source,
+                        direction=direction,
+                        allow_exact_matches=allow_exact_matches)
 
 
 def _find_nearest(origin, fit):
@@ -130,7 +151,11 @@ def regress(design_matrix: pd.DataFrame,
     dm = design_matrix.loc[:, design_matrix.sum() > min_events]
     if dm.empty:
         return pd.Series(dtype=float, index=dm.columns)
-    print(data.shape, dm.shape)
+    logging.info(f'Design matrix shape {dm.shape} fitting to '
+                 f'data shape {data.shape}')
     lr = sm.OLS(data.to_numpy(), dm.to_numpy()).fit()
-    return pd.Series(lr.params, index=dm.columns)
+    fitted = pd.Series(lr.params, index=dm.columns, name='beta')
+    fitted.attrs['rsquared'] = lr.rsquared
+    fitted.attrs['rsquared_adj'] = lr.rsquared_adj
+    return fitted
 
