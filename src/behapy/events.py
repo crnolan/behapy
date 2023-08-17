@@ -35,7 +35,7 @@ def load_events(root: Path,
 def _find_events(events: pd.DataFrame,
                  reference: Union[str, Iterable[str]],
                  source: Union[str, Iterable[str]],
-                 include: Iterable[str] = [],
+                 reject: Iterable[str] = [],
                  direction: Literal['backward', 'forward'] = 'forward',
                  allow_exact_matches: bool = True) -> pd.DataFrame:
     reference = [reference] if isinstance(reference, str) else reference
@@ -72,7 +72,7 @@ def _find_events(events: pd.DataFrame,
 def find_events(events: pd.DataFrame,
                 reference: Union[str, Iterable[str]],
                 source: Union[str, Iterable[str]],
-                include: Iterable[str] = [],
+                reject: Iterable[str] = [],
                 direction: Literal['backward', 'forward'] = 'forward',
                 allow_exact_matches: bool = True) -> pd.DataFrame:
     """Find events relative to other events and return their latencies.
@@ -81,7 +81,7 @@ def find_events(events: pd.DataFrame,
         events (pd.DataFrame): events DataFrame
         reference (str): event of interest
         source (str): event by which to filter the reference event
-        include (Iterable[str]): events that can act as interrupting events
+        reject (Iterable[str]): events that can act as interrupting events
             between source and reference events
         direction (Literal['backward', 'forward']):
             direction of the reference event _from_ the source event
@@ -94,6 +94,7 @@ def find_events(events: pd.DataFrame,
     return groups.apply(_find_events,
                         reference=reference,
                         source=source,
+                        reject=reject,
                         direction=direction,
                         allow_exact_matches=allow_exact_matches)
 
