@@ -40,7 +40,7 @@ def _find_events(events: pd.DataFrame,
                  allow_exact_matches: bool = True) -> pd.DataFrame:
     reference = [reference] if isinstance(reference, str) else reference
     source = [source] if isinstance(source, str) else source
-    include = include + source
+    reject = reject + source
     index_cols = [n for n in events.index.names
                     if n in (set(events.index.names) - {'onset'})]
     rdf = events.droplevel(index_cols)
@@ -49,7 +49,7 @@ def _find_events(events: pd.DataFrame,
     # tdf = pd.DataFrame(index=events.loc[events.event_id.isin(source), :].index)
     # tdf = tdf.droplevel(index_cols)
     tdf = events.droplevel(index_cols)
-    tdf = tdf.loc[tdf.event_id.isin(include), ['event_id']]
+    tdf = tdf.loc[tdf.event_id.isin(reject), ['event_id']]
     tdf.rename(columns={'event_id': 'source_event_id'}, inplace=True)
     tdf.index = tdf.index.set_names('source_onset')
     if len(tdf) == 0 or len(rdf) == 0:
