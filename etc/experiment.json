@@ -1,4 +1,5 @@
 {
+    "invert_events": false,
     "event_names": [
         "llp",
         "mag",

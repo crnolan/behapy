@@ -33,22 +33,26 @@ def load_session_tank_map(filename: str) -> pd.DataFrame:
     return info
 
 
-def load_event_names(filename: str) -> Union[List[str], None]:
+def load_experiment_params(filename: str) -> Union[List[str], None]:
     with open(filename) as file:
-        events_dict = json.load(file)
-    try:
-        event_names = events_dict['event_names']
-    except KeyError:
-        logging.warning('No event names found in events file, using '
+        params = json.load(file)
+    if 'event_names' not in params:
+        params['event_names'] = None
+        logging.warning('No event names found in experiment file, using '
                         'default names')
-        return None
-    return event_names
+    if 'invert_events' not in params:
+        params['invert_events'] = False
+        logging.warning('Event polarity not defined, assuming 0 is off')
+    return params
 
 
-def get_epoch_df(epoch, event_names=None):
+def get_epoch_df(epoch, event_names=None, invert_events=False):
     if event_names is None:
         event_names = [str(i) for i in range(8)]
     bits = [list('{:08b}'.format(x.astype(int))) for x in epoch.data]
+    if invert_events:
+        bits = ~np.array(bits).astype(bool)
+        bits = bits.astype(int)
     bits = np.array(bits).astype(int)
     # Add a row of zeros to ensure all events have offsets
     bits = np.concatenate([bits, np.zeros_like(bits[:1, :])])
@@ -69,7 +73,7 @@ def get_epoch_df(epoch, event_names=None):
     return df.set_index('onset')
 
 
-def convert_stream(df, block, root, event_names=None):
+def convert_stream(df, block, root, event_names=None, invert_events=False):
     info_msg = ('Creating raw data for subject {}, session {}, task {}, '
                 'run {}, channel {}, label {} from block {}, stream {}')
     info_msg = info_msg.format(df.subject, df.session, df.task, df.run,
@@ -93,19 +97,22 @@ def convert_stream(df, block, root, event_names=None):
         fn = get_events_path(root, df.subject, df.session, df.task, df.run)
         fn.parent.mkdir(parents=True, exist_ok=True)
         events_df = get_epoch_df(block.epocs[df.tdt_id],
-                                 event_names=event_names)
+                                 event_names=event_names,
+                                 invert_events=invert_events)
         events_df.to_csv(fn, sep=',', na_rep='n/a')
 
 
-def convert_block(df, root, event_names=None):
+def convert_block(df, root, event_names=None, invert_events=False):
     blocks = df.block.unique()
     if len(blocks) > 1:
-        df.groupby('block').apply(convert_block, root, event_names)
+        df.groupby('block').apply(convert_block, root, event_names,
+                                  invert_events)
     else:
         logging.info('Opening block {}'.format(blocks[0]))
         try:
             block = read_block(blocks[0])
             df.apply(convert_stream, block=block, root=root,
-                     event_names=event_names, axis=1)
+                     event_names=event_names, invert_events=invert_events,
+                     axis=1)
         except FileNotFoundError:
             logging.warn('Cannot open block at path {}'.format(blocks[0]))

@@ -9,7 +9,7 @@ import panel as pn
 from . import medpc
 from pathlib import Path
 from .pathutils import list_raw, get_preprocessed_fibre_path
-from .tdt import load_session_tank_map, load_event_names, convert_block
+from .tdt import load_session_tank_map, load_experiment_params, convert_block
 from .visuals import PreprocessDashboard
 from . import fp
 
@@ -24,8 +24,9 @@ def tdt2bids(session_fn: str, experiment_fn: str, bids_root: str) -> None:
                    `rawdata` sub-folder of `bids_root`)
     """
     session_df = load_session_tank_map(session_fn)
-    event_names = load_event_names(experiment_fn)
-    convert_block(session_df, Path(bids_root), event_names)
+    ep = load_experiment_params(experiment_fn)
+    convert_block(session_df, Path(bids_root), ep['event_names'],
+                  ep['invert_events'])
 
 
 def tdt2bids_command():
