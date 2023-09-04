@@ -20,12 +20,9 @@ def load_preprocessed_experiment(root):
         r = row.iloc[0]
         return load_events(root, r.subject, r.session, r.task, r.run)
 
-    dff_id = ['subject', 'session', 'task', 'run', 'label']
-    dff_recordings = recordings.loc[:, dff_id].drop_duplicates()
-    dff = dff_recordings.groupby(dff_id).apply(_load_preprocessed)
+    id = ['subject', 'session', 'task', 'run', 'label']
+    dff = recordings.groupby(id).apply(_load_preprocessed)
     dff.attrs = _load_preprocessed(recordings.iloc[[0]]).attrs
-    events_id = ['subject', 'session', 'task', 'run']
-    events_recordings = recordings.loc[:, events_id].drop_duplicates()
-    events = events_recordings.groupby(events_id).apply(_load_events)
+    events = recordings.groupby(id).apply(_load_events)
     events.attrs = _load_events(recordings.iloc[[0]]).attrs
     return Preprocessed(recordings, dff, events)
