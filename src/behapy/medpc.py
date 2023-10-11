@@ -5,12 +5,33 @@ from collections import namedtuple
 from typing import Tuple, Union, Any
 from datetime import datetime
 from string import ascii_uppercase
+from pathlib import Path
 import pandas as pd
+from .pathutils import get_events_path
+
+
+def load_medpc_map(filename: str) -> pd.DataFrame:
+    """Loads a file mapping sessions to the MedPC files.
+
+    Args:
+        filename (str): path to the session mapping file
+    """
+    dtypes = {
+        'path': str,
+        'subject': str,
+        'session': str,
+        'task': str,
+        'run': str
+    }
+    info = pd.read_csv(filename, dtype=dtypes)
+    resolved_path = Path(filename).resolve().parent
+    info.block = info.block.apply(lambda x: resolved_path / x)
+    return info
 
 
 def experiment_info(variables: "dict[str, str]") -> pd.Series:
     """Parse the experiment infomation from variables.
-    
+
     Args:
         variables: A set of MedPC variables extracted via `parse_file`.
 
@@ -36,7 +57,7 @@ def get_events(timestamps: "list[str]",
                event_idxs: "list[str]",
                event_map: "dict[int, str]" = None) -> pd.DataFrame:
     """Parse string-encoded timestamps and events.
-    
+
     Args:
         timestamps: A list of strings of floats representing seconds as
             written by MedPC.
@@ -70,7 +91,7 @@ def get_events(timestamps: "list[str]",
     return pd.DataFrame(event_list,
                         columns=['timestamp', 'event'])
 
-    
+
 def parse_line(line: str, prev_token: str, prev_data: Any) -> Tuple[str, str]:
     if len(line.strip()) == 0:
         return None, None
@@ -96,3 +117,12 @@ def parse_file(filename: str) -> dict:
                 continue
             variables[token] = data
     return variables
+
+
+def convert_file(path, subject, session, task, run, config, bids_root):
+    variables = parse_file(path)
+    events = get_events(variables[config['timestamp']],
+                        variables[config['event_index']],
+                        config['event_map'])
+    outpath = get_events_path(bids_root, subject, session, task, run)
+    events.to_csv(outpath)

@@ -19,7 +19,7 @@ def tdt2bids(session_fn: str, experiment_fn: str, bids_root: str) -> None:
 
     Args:
         session_fn: Map of the files to sessions
-        experiment_fn:
+        experiment_fn: Experiment parameters
         bids_root: Root path of the BIDS structure (data will be put in the
                    `rawdata` sub-folder of `bids_root`)
     """
@@ -45,6 +45,42 @@ def tdt2bids_command():
     tdt2bids(**vars(args))
 
 
+def medpc2bids(session_fn: str, experiment_fn: str, bids_root: str) -> None:
+    """Convert MedPC output into BIDS format.
+
+    Args:
+        session_fn: Map of the files to sessions
+        experiment_fn: Experiment parameters (including MedPC event mapping)
+        bids_root: Root path of the BIDS structure (data will be put in the
+                   `rawdata` sub-folder of `bids_root`)
+    """
+    session_df = medpc.load_medpc_map(session_fn)
+    with open(experiment_fn) as file:
+        config = json.load(file)
+    config['event_map'] = {int(key): value
+                           for key, value in config['event_map'].items()}
+    # TODO: What to do with header information?
+    session_df.apply(
+        lambda r: medpc.convert_file(r.path, r.subject, r.session, r.task,
+                                     r.run, config, bids_root))
+
+
+def medpc2bids_command():
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+    parser = argparse.ArgumentParser(
+        description='Convert MedPC files into BIDS format'
+    )
+    parser.add_argument('session_fn', type=str,
+                        help='path to CSV file with TDT session information')
+    parser.add_argument('experiment_fn', type=str,
+                        help='path to JSON file with experiment details')
+    parser.add_argument('bids_root', type=str,
+                        help='root path of the BIDS dataset (data will '
+                             'be put in the rawdata sub-folder of bids_root)')
+    args = parser.parse_args()
+    medpc2bids(**vars(args))
+
+
 def medpc2csv(source_pattern: str,
               output_path: str,
               config_fn: str) -> None:
@@ -56,8 +92,8 @@ def medpc2csv(source_pattern: str,
     Args:
         source_pattern: Glob path pattern for source files
         output_path: Path for the two output CSV files
-        events_mapping_fn: Configuration file containing variable mapping
-                           and the events mapping dict.
+        config_fn: Configuration file containing variable mapping
+                   and the events mapping dict.
     """
     all_info = []
     all_events = []
