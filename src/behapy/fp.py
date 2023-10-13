@@ -13,8 +13,8 @@ from intervaltree import IntervalTree, Interval
 from numpy.lib.stride_tricks import sliding_window_view
 import bottleneck as bn
 from .pathutils import get_raw_fibre_path, list_raw, \
-    get_rejected_intervals_path, get_preprocessed_fibre_path, \
-    preprocess_config_path
+    get_rejected_intervals_path, get_preprocessed_fibre_path
+from .config import load_preprocess_config
 
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
@@ -252,8 +252,9 @@ def intervals_to_mask(signal: pd.DataFrame, intervals: Interval) -> pd.Series:
         A boolean mask with True for valid samples and False for rejected
         samples.
     """
-    intervals.merge_overlaps()
-    interval_list = [(i[0], i[1]) for i in list(intervals)]
+    _intervals = intervals.copy()
+    _intervals.merge_overlaps()
+    interval_list = [(i[0], i[1]) for i in list(_intervals)]
     mask = pd.Series(True, index=signal.index)
     for start, end in interval_list:
         mask.loc[start:end] = False
@@ -267,8 +268,9 @@ def reject(signal, intervals, fill=False):
         # Return a copy of the signal with the rejected intervals
         # replace with a linear interpolation between the endpoints.
         signal = signal.copy()
-        for start, end in interval_list:
-            signal.loc[start:end] = np.nan
+        signal.loc[~mask] = np.nan
+        # for start, end in interval_list:
+        #     signal.loc[start:end] = np.nan
         signal = signal.interpolate(method='linear', limit_direction='both')
         signal['mask'] = mask
         return signal
@@ -318,7 +320,7 @@ def detrend(data, numtaps=1001, cutoff=0.05):
     try:
         b = detrend.filter_b
     except AttributeError:
-        b = sig.firwin(numtaps, cutoff=[0.05], fs=data.attrs['fs'],
+        b = sig.firwin(numtaps, cutoff=[cutoff], fs=data.attrs['fs'],
                        pass_zero=False)
         detrend.filter_b = b
     detrended = series_like(data, 'detrended')
@@ -389,7 +391,7 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
 
 
 def preprocess(root, subject, session, task, run, label):
-    config = json.load(preprocess_config_path(root))
+    config = load_preprocess_config(root)
     intervals = load_rejections(root, subject, session, task, run, label)
     # Check if the recording has rejections saved
     if intervals is None:
