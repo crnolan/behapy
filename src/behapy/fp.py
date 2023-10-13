@@ -13,7 +13,8 @@ from intervaltree import IntervalTree, Interval
 from numpy.lib.stride_tricks import sliding_window_view
 import bottleneck as bn
 from .pathutils import get_raw_fibre_path, list_raw, \
-    get_rejected_intervals_path, get_preprocessed_fibre_path
+    get_rejected_intervals_path, get_preprocessed_fibre_path, \
+    preprocess_config_path
 
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
@@ -240,13 +241,28 @@ def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
     return dc_intervals
 
 
-def reject(signal, intervals, fill=False):
-    """ Filter the site data to remove the specified intervals. """
+def intervals_to_mask(signal: pd.DataFrame, intervals: Interval) -> pd.Series:
+    """Convert a list of intervals to a boolean mask.
+
+    Args:
+        signal: The timeseries over which to generate a mask.
+        intervals: A list of intervals.
+
+    Returns:
+        A boolean mask with True for valid samples and False for rejected
+        samples.
+    """
     intervals.merge_overlaps()
     interval_list = [(i[0], i[1]) for i in list(intervals)]
     mask = pd.Series(True, index=signal.index)
     for start, end in interval_list:
         mask.loc[start:end] = False
+    return mask
+
+
+def reject(signal, intervals, fill=False):
+    """ Filter the site data to remove the specified intervals. """
+    mask = intervals_to_mask(signal, intervals)
     if fill:
         # Return a copy of the signal with the rejected intervals
         # replace with a linear interpolation between the endpoints.
@@ -298,7 +314,7 @@ def smooth(data):
     return smoothed
 
 
-def detrend(data, numtaps=1001):
+def detrend(data, numtaps=1001, cutoff=0.05):
     try:
         b = detrend.filter_b
     except AttributeError:
@@ -311,10 +327,11 @@ def detrend(data, numtaps=1001):
 
 
 def exp_fit(data):
-    exp_func = lambda x, a, b, c: a * np.exp(-b * x) + c
-    popt, pcov = curve_fit(exp_func, data.index, data, maxfev=10000)
+    def _exp_func(x, a1, b1, a2, b2, c):
+        return a1 * np.exp(-b1 * x) + a2 * np.exp(-b2 * x) + c
+    popt, pcov = curve_fit(_exp_func, data.index, data, maxfev=10000)
     fit = series_like(data, 'fit')
-    fit[:] = exp_func(data.index.to_numpy(), *popt)
+    fit[:] = _exp_func(data.index.to_numpy(), *popt)
     return fit
 
 
@@ -372,6 +389,7 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
 
 
 def preprocess(root, subject, session, task, run, label):
+    config = json.load(preprocess_config_path(root))
     intervals = load_rejections(root, subject, session, task, run, label)
     # Check if the recording has rejections saved
     if intervals is None:
@@ -391,7 +409,7 @@ def preprocess(root, subject, session, task, run, label):
     # Let's just detrend and divide by the smoothed signal instead.
     # dff = fp.series_like(recording, name='dff')
     # dff.loc[rej.index] = fp.detrend(rej[ch])
-    dff = detrend(rej[ch])
+    dff = detrend(rej[ch], cutoff=config['detrend_cutoff'])
     dff = dff / smooth(rej[ch])
     dff.name = 'dff'
     dff = dff.to_frame()
