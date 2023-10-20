@@ -331,7 +331,10 @@ def detrend(data, numtaps=1001, cutoff=0.05):
 def exp_fit(data):
     def _exp_func(x, a1, b1, a2, b2, c):
         return a1 * np.exp(-b1 * x) + a2 * np.exp(-b2 * x) + c
-    popt, pcov = curve_fit(_exp_func, data.index, data, maxfev=10000)
+    _max = data.max()
+    popt, pcov = curve_fit(_exp_func, data.index, data, maxfev=10000,
+                           bounds=[(-_max, 0, -_max, 0, 0), (_max, np.inf, _max, np.inf, _max)])
+    logging.info(f'popt: {popt}')
     fit = series_like(data, 'fit')
     fit[:] = _exp_func(data.index.to_numpy(), *popt)
     return fit
