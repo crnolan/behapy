@@ -5,15 +5,16 @@ channels:
 dependencies:
   - python
   - pip
+  - ipykernel
   - numpy
   - pandas
   - statsmodels
   - matplotlib
   - seaborn
   - intervaltree
-  - bokeh==2.4.3
+  - bokeh
   - jupyter_bokeh
-  - holoviews==1.15.4
+  - holoviews
   - datashader
   - pyarrow
   - bottleneck

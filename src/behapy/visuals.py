@@ -1,3 +1,4 @@
+import logging
 from functools import partial
 from intervaltree import Interval
 from . import fp
@@ -9,6 +10,7 @@ from holoviews.operation.datashader import datashade
 import holoviews.streams as streams
 import panel as pn
 import param
+hv.extension('bokeh')
 pn.extension('tabulator', comms='vscode')
 # pn.extension('tabulator')
 
@@ -31,26 +33,24 @@ def interval_overlay(intervals, selected=[]):
                        for interval, c in zip(intervals, colors)])
 
 
-def record_intervals(boundsx, x, y, intervals, interval_callback=None):
-#     if boundsx is None:
-#         return hv.Overlay([])
+def record_intervals(bounds, x, y, intervals, interval_callback=None):
     if None not in [x, y]:
         intervals.remove_overlap(x)
-        print(intervals)
+        logging.debug(f'Intervals now {intervals}')
         if interval_callback is not None:
             interval_callback()
-    if boundsx is not None and None not in boundsx:
-        intervals.add(Interval(*boundsx))
+    if bounds is not None and None not in [bounds[0], bounds[2]]:
+        intervals.add(Interval(bounds[0], bounds[2]))
         intervals.merge_overlaps()
-        print(intervals)
+        logging.debug(f'Intervals now {intervals}')
         if interval_callback is not None:
             interval_callback()
     return interval_overlay(intervals)
 
 
 def interval_overlay_map(trace, intervals, interval_callback=None):
-    interval_stream = streams.BoundsX(source=trace, boundsx=None,
-                                      transient=False)
+    interval_stream = streams.BoundsXY(source=trace,
+                                       transient=False)
     select_stream = streams.DoubleTap(source=trace, x=None, y=None,
                                       transient=False)
     return hv.DynamicMap(partial(record_intervals, intervals=intervals,
@@ -158,6 +158,7 @@ class PreprocessDashboard(param.Parameterized):
         if self.recording is None:
             return
         regression = self.regression
+        tools = ['xbox_select']
         isoch = self.recording.attrs['iso_channel']
         ch = self.recording.attrs['channel']
         iso_shade = datashade(
@@ -165,7 +166,7 @@ class PreprocessDashboard(param.Parameterized):
             aggregator=ds.count(), cmap='blue')
         sig_shade = datashade(
             signal_curve(self.recording[ch], y_dim='F'),
-            aggregator=ds.count(), cmap='red')
+            aggregator=ds.count(), cmap='red').opts(tools=tools)
         dff_shade = datashade(
             signal_curve(self.dff, y_dim='dF/F'),
             aggregator=ds.count(), cmap='green')
@@ -174,7 +175,6 @@ class PreprocessDashboard(param.Parameterized):
         # plot = (rej_shade.opts(xaxis=None) +
         plot = ((iso_shade * sig_shade * overlay).opts(xaxis=None) +
                 dff_shade)
-        tools = ['xbox_select']
         plot = plot.opts(
             opts.RGB(responsive=True, min_width=600, min_height=300,
                      tools=tools))
