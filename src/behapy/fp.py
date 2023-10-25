@@ -86,8 +86,10 @@ def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
                    'for subject {}, session {}, task {}, run {} and label {}')
             msg.format(subject, session, task, run, label)
             raise ValueError(msg)
-        data.append(pd.Series(d, name=r.channel,
-                              index=np.arange(d.shape[0]) / fs + t0))
+        t = pd.TimedeltaIndex(np.arange(d.shape[0]) / fs + t0,
+                              unit='s',
+                              name='time')
+        data.append(pd.Series(d, name=r.channel, index=t))
 
     signal = pd.concat(data, axis=1)
     signal.index.name = 'time'
