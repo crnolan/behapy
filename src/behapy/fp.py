@@ -307,11 +307,11 @@ def invalidate_samples(df, start, end):
     return df
 
 
-def smooth(data):
+def smooth(data, cutoff=1):
     try:
         b = smooth.filter_b
     except AttributeError:
-        b = sig.firwin(1001, cutoff=[1], fs=data.attrs['fs'], pass_zero=True)
+        b = sig.firwin(1001, cutoff=[cutoff], fs=data.attrs['fs'], pass_zero=True)
         smooth.filter_b = b
     smoothed = series_like(data, 'smoothed')
     smoothed[:] = sig.filtfilt(b, 1, data)
