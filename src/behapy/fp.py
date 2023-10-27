@@ -342,6 +342,25 @@ def exp_fit(data):
     return fit
 
 
+def full_fit(data):
+    def _func(x, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, gamma):
+        x0 = x[:(len(x) // 2)]
+        x1 = x[(len(x) // 2):]
+        return (a0 * np.exp(-b0 * x0) + a1 * np.exp(-b1 * x0)
+                + gamma * (a2 * np.exp(-b2 * x)
+                           + a3 * np.exp(-b3 * x)
+                           + c1)
+                + c0)
+    M = data.max()
+    popt, pcov = curve_fit(_func, data.index, data, maxfev=10000,
+                           bounds=[(-M, -M, -M, -M, 0, 0, 0, 0, -np.inf, -np.inf, ),
+                                   (_max, np.inf, _max, np.inf, _max)])
+    logging.info(f'popt: {popt}')
+    fit = series_like(data, 'fit')
+    fit[:] = _func(data.index.to_numpy(), *popt)
+    return fit
+
+
 def debleach(data):
     """ Debleach the data by fitting an exponential and subtracting"""
     exp_func = lambda x, a, b, c: a * np.exp(-b * x) + c
