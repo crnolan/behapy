@@ -89,6 +89,7 @@ def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
         t = pd.TimedeltaIndex(np.arange(d.shape[0]) / fs + t0,
                               unit='s',
                               name='time')
+        t = pd.Index(np.arange(d.shape[0]) / fs + t0, name='time')
         data.append(pd.Series(d, name=r.channel, index=t))
 
     signal = pd.concat(data, axis=1)
@@ -136,7 +137,7 @@ def downsample(signal, factor=None):
                       zero_phase=True, axis=0)
     ts = (np.arange(ds.shape[0]) / (signal.attrs['fs'] / factor) +
           signal.attrs['start_time'])
-    df = pd.DataFrame(ds, index=ts, columns=signal.columns)
+    df = pd.DataFrame(ds, index=signal.index[::factor], columns=signal.columns)
     df.attrs = signal.attrs
     df.attrs['fs'] = signal.attrs['fs'] / factor
     return df
