@@ -28,7 +28,7 @@ def load_events(root: Path,
     if not events_path.exists():
         raise ValueError(f'Events file {events_path} does not exist')
     events = pd.read_csv(events_path, index_col=0)
-    events.index = pd.to_timedelta(events.index, unit='s')
+    # events.index = pd.to_timedelta(events.index, unit='s')
     return events
 
 

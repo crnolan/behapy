@@ -27,16 +27,15 @@ dff['dff'] = dff.dff.groupby(dff_id, group_keys=False).apply(lambda df: (df - df
 def _map_ipsi_contra(row):
     r = row.iloc[0]
     if r.label == 'RDMS':
-        events = pre.events.loc[(r.subject, r.session, r.task, r.run)].replace({'rlp': 'ipsilp', 'llp': 'contralp'})
+        events = pre.events.loc[(r.subject, r.session, r.task, r.run, r.label)].replace({'rlp': 'ipsilp', 'llp': 'contralp'})
     elif r.label == 'LDMS':
-        events = pre.events.loc[(r.subject, r.session, r.task, r.run)].replace({'rlp': 'contralp', 'llp': 'ipsilp'})
+        events = pre.events.loc[(r.subject, r.session, r.task, r.run, r.label)].replace({'rlp': 'contralp', 'llp': 'ipsilp'})
     else:
         raise ValueError(f'Unknown label {r.label}')
     return events.sort_index(level='onset')
 
 
 events = dff_recordings.groupby(dff_id).apply(_map_ipsi_contra)
-events = events.droplevel('label')
 events
 
 # %%
@@ -49,10 +48,12 @@ def _get_nonevent(events, sub_events):
 REWmag = find_events(events, 'mag', ['pel', 'suc'])
 NOREWmag = _get_nonevent(events.loc[events.event_id == 'mag', :], REWmag)
 first_ipsilp = find_events(events, 'ipsilp', ['ipsilp', 'contralp', 'mag'], allow_exact_matches=False)
-first_ipsilp = first_ipsilp.loc[first_ipsilp.latency < pd.to_timedelta('2s')]
+# first_ipsilp = first_ipsilp.loc[first_ipsilp.latency < pd.to_timedelta('2s')]
+first_ipsilp = first_ipsilp.loc[first_ipsilp.latency < 2]
 notfirst_ipsilp = _get_nonevent(events.loc[events.event_id == 'ipsilp', :], first_ipsilp)
 first_contralp = find_events(events, 'contralp', ['ipsilp', 'contralp', 'mag'], allow_exact_matches=False)
-first_contralp = first_contralp.loc[first_contralp.latency < pd.to_timedelta('2s')]
+# first_contralp = first_contralp.loc[first_contralp.latency < pd.to_timedelta('2s')]
+first_contralp = first_contralp.loc[first_contralp.latency < 2]
 notfirst_contralp = _get_nonevent(events.loc[events.event_id == 'contralp', :], first_contralp)
 new_events = pd.concat([REWmag, NOREWmag, first_ipsilp, notfirst_ipsilp, first_contralp, notfirst_contralp],
                        keys=['REWmag', 'NOREWmag', 'first_ipsilp', 'notfirst_ipsilp', 'first_contralp', 'notfirst_contralp'],
@@ -61,10 +62,11 @@ new_events = new_events.reset_index('event_id').loc[:, ['duration', 'event_id']]
 events = pd.concat([events, new_events]).sort_index()
 
 # %%
-plot_meta = {'Magazine': ['REWmag', 'NOREWmag'],
-             'Reward': ['pel', 'suc'],
-             'First press': ['first_ipsilp', 'first_contralp'],
-             'Other press': ['notfirst_ipsilp', 'notfirst_contralp']}
+plot_meta = {'Magazine': ['REWmag', 'NOREWmag']}
+# plot_meta = {'Magazine': ['REWmag', 'NOREWmag'],
+#              'Reward': ['pel', 'suc'],
+#              'First press': ['first_ipsilp', 'first_contralp'],
+#              'Other press': ['notfirst_ipsilp', 'notfirst_contralp']}
 event_ids_of_interest = sum(plot_meta.values(), [])
 events_of_interest = events.loc[events.event_id.isin(event_ids_of_interest), :]
 
@@ -73,7 +75,7 @@ def _build_design_matrix(row):
     r = row.iloc[0]
     return build_design_matrix(
         dff.loc[(r.subject, r.session, r.task, r.run, r.label), :],
-        events_of_interest.loc[(r.subject, r.session, r.task, r.run), :],
+        events_of_interest.loc[(r.subject, r.session, r.task, r.run, r.label), :],
         (-1, 2))
 
 
