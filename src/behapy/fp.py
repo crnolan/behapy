@@ -14,6 +14,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 import bottleneck as bn
 from .pathutils import get_raw_fibre_path, list_raw, \
     get_rejected_intervals_path, get_preprocessed_fibre_path
+from .config import load_preprocess_config
 
 
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
@@ -85,8 +86,11 @@ def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
                    'for subject {}, session {}, task {}, run {} and label {}')
             msg.format(subject, session, task, run, label)
             raise ValueError(msg)
-        data.append(pd.Series(d, name=r.channel,
-                              index=np.arange(d.shape[0]) / fs + t0))
+        t = pd.TimedeltaIndex(np.arange(d.shape[0]) / fs + t0,
+                              unit='s',
+                              name='time')
+        t = pd.Index(np.arange(d.shape[0]) / fs + t0, name='time')
+        data.append(pd.Series(d, name=r.channel, index=t))
 
     signal = pd.concat(data, axis=1)
     signal.index.name = 'time'
@@ -133,7 +137,7 @@ def downsample(signal, factor=None):
                       zero_phase=True, axis=0)
     ts = (np.arange(ds.shape[0]) / (signal.attrs['fs'] / factor) +
           signal.attrs['start_time'])
-    df = pd.DataFrame(ds, index=ts, columns=signal.columns)
+    df = pd.DataFrame(ds, index=signal.index[::factor], columns=signal.columns)
     df.attrs = signal.attrs
     df.attrs['fs'] = signal.attrs['fs'] / factor
     return df
@@ -240,19 +244,36 @@ def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
     return dc_intervals
 
 
-def reject(signal, intervals, fill=False):
-    """ Filter the site data to remove the specified intervals. """
-    intervals.merge_overlaps()
-    interval_list = [(i[0], i[1]) for i in list(intervals)]
+def intervals_to_mask(signal: pd.DataFrame, intervals: Interval) -> pd.Series:
+    """Convert a list of intervals to a boolean mask.
+
+    Args:
+        signal: The timeseries over which to generate a mask.
+        intervals: A list of intervals.
+
+    Returns:
+        A boolean mask with True for valid samples and False for rejected
+        samples.
+    """
+    _intervals = intervals.copy()
+    _intervals.merge_overlaps()
+    interval_list = [(i[0], i[1]) for i in list(_intervals)]
     mask = pd.Series(True, index=signal.index)
     for start, end in interval_list:
         mask.loc[start:end] = False
+    return mask
+
+
+def reject(signal, intervals, fill=False):
+    """ Filter the site data to remove the specified intervals. """
+    mask = intervals_to_mask(signal, intervals)
     if fill:
         # Return a copy of the signal with the rejected intervals
         # replace with a linear interpolation between the endpoints.
         signal = signal.copy()
-        for start, end in interval_list:
-            signal.loc[start:end] = np.nan
+        signal.loc[~mask] = np.nan
+        # for start, end in interval_list:
+        #     signal.loc[start:end] = np.nan
         signal = signal.interpolate(method='linear', limit_direction='both')
         signal['mask'] = mask
         return signal
@@ -287,22 +308,22 @@ def invalidate_samples(df, start, end):
     return df
 
 
-def smooth(data):
+def smooth(data, cutoff=1):
     try:
         b = smooth.filter_b
     except AttributeError:
-        b = sig.firwin(1001, cutoff=[1], fs=data.attrs['fs'], pass_zero=True)
+        b = sig.firwin(1001, cutoff=[cutoff], fs=data.attrs['fs'], pass_zero=True)
         smooth.filter_b = b
     smoothed = series_like(data, 'smoothed')
     smoothed[:] = sig.filtfilt(b, 1, data)
     return smoothed
 
 
-def detrend(data, numtaps=1001):
+def detrend(data, numtaps=1001, cutoff=0.05):
     try:
         b = detrend.filter_b
     except AttributeError:
-        b = sig.firwin(numtaps, cutoff=[0.05], fs=data.attrs['fs'],
+        b = sig.firwin(numtaps, cutoff=[cutoff], fs=data.attrs['fs'],
                        pass_zero=False)
         detrend.filter_b = b
     detrended = series_like(data, 'detrended')
@@ -311,10 +332,33 @@ def detrend(data, numtaps=1001):
 
 
 def exp_fit(data):
-    exp_func = lambda x, a, b, c: a * np.exp(-b * x) + c
-    popt, pcov = curve_fit(exp_func, data.index, data, maxfev=10000)
+    def _exp_func(x, a1, b1, a2, b2, c):
+        return a1 * np.exp(-b1 * x) + a2 * np.exp(-b2 * x) + c
+    _max = data.max()
+    popt, pcov = curve_fit(_exp_func, data.index, data, maxfev=10000,
+                           bounds=[(-_max, 0, -_max, 0, 0), (_max, np.inf, _max, np.inf, _max)])
+    logging.info(f'popt: {popt}')
     fit = series_like(data, 'fit')
-    fit[:] = exp_func(data.index.to_numpy(), *popt)
+    fit[:] = _exp_func(data.index.to_numpy(), *popt)
+    return fit
+
+
+def full_fit(data):
+    def _func(x, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, gamma):
+        x0 = x[:(len(x) // 2)]
+        x1 = x[(len(x) // 2):]
+        return (a0 * np.exp(-b0 * x0) + a1 * np.exp(-b1 * x0)
+                + gamma * (a2 * np.exp(-b2 * x)
+                           + a3 * np.exp(-b3 * x)
+                           + c1)
+                + c0)
+    M = data.max()
+    popt, pcov = curve_fit(_func, data.index, data, maxfev=10000,
+                           bounds=[(-M, -M, -M, -M, 0, 0, 0, 0, -np.inf, -np.inf, ),
+                                   (_max, np.inf, _max, np.inf, _max)])
+    logging.info(f'popt: {popt}')
+    fit = series_like(data, 'fit')
+    fit[:] = _func(data.index.to_numpy(), *popt)
     return fit
 
 
@@ -372,6 +416,7 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
 
 
 def preprocess(root, subject, session, task, run, label):
+    config = load_preprocess_config(root)
     intervals = load_rejections(root, subject, session, task, run, label)
     # Check if the recording has rejections saved
     if intervals is None:
@@ -391,7 +436,7 @@ def preprocess(root, subject, session, task, run, label):
     # Let's just detrend and divide by the smoothed signal instead.
     # dff = fp.series_like(recording, name='dff')
     # dff.loc[rej.index] = fp.detrend(rej[ch])
-    dff = detrend(rej[ch])
+    dff = detrend(rej[ch], cutoff=config['detrend_cutoff'])
     dff = dff / smooth(rej[ch])
     dff.name = 'dff'
     dff = dff.to_frame()

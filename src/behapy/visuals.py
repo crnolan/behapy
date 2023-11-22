@@ -1,7 +1,9 @@
 import logging
 from functools import partial
 from intervaltree import Interval
+import json
 from . import fp
+from .config import load_preprocess_config
 import pandas as pd
 import holoviews as hv
 from holoviews import opts
@@ -76,10 +78,11 @@ class PreprocessDashboard(param.Parameterized):
     interval_update = param.Integer(default=0, allow_None=False)
     regression_update = param.Integer(default=0, allow_None=False)
 
-    def __init__(self, recordings, data_func, **params):
+    def __init__(self, recordings, data_func, bidsroot, **params):
         super().__init__(**params)
         self.metadata_table = recordings
         self.data_func = data_func
+        self.bidsroot = bidsroot
         self.recording = None
         self.intervals = None
         self.regression = None
@@ -134,9 +137,10 @@ class PreprocessDashboard(param.Parameterized):
     def update_regressions(self):
         rej = fp.reject(self.recording, self.intervals, fill=True)
         ch = self.recording.attrs['channel']
+        config = load_preprocess_config(self.bidsroot)
         # We were doing a robust regression, but the fit isn't good enough.
         # Let's just detrend and divide by the smoothed signal instead.
-        dff = fp.detrend(rej[ch])
+        dff = fp.detrend(rej[ch], cutoff=config['detrend_cutoff'])
         dff = dff / fp.smooth(rej[ch])
         dff.name = 'dff'
         # dff = fp.series_like(self.recording, name='dff')

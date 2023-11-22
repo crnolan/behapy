@@ -18,6 +18,7 @@ dependencies:
   - datashader
   - pyarrow
   - bottleneck
+  - ipykernel
   - pip:
     - tdt
 
