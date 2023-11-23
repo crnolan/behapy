@@ -7,7 +7,8 @@ from behapy.utils import load_preprocessed_experiment
 from behapy.events import build_design_matrix, regress, find_events
 import statsmodels.api as sm
 import seaborn as sns
-from rpy2 import robjects # for running fastFMM in R
+import rpy2.robjects as robjects
+from rpy2.robjects import pandas2ri
 sns.set_theme()
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
@@ -91,17 +92,22 @@ def _regress(df):
     return regress(df, dff.loc[df.index, 'dff'], min_events=25)
 
 # %%
-r_script = '''
 
-library(fastFMM)
+# activate R magic
+pandas2ri.activate()
 
-# CODE HERE
+# define the path to the R script
+r_file_path = '..'
 
-'''
+# open the file and read it into a string
+with open(r_file_path, 'r') as file:
+    r_script_string = file.read()
+ 
+r_result = robjects.r(r_script_string)
+r_dataframe = robjects.r['dat'] # retrieve R dataframe assigned to 'dat'. 
+pd_dataframe = pandas2ri.rpy2py(r_dataframe) # convert to pandas dataframe
 
-r_result = robjects.r(r_script)
-
-
+pd_dataframe.head()
 
 # %%
 r1 = dm_filt.loc[:, idx[sum(plot_meta.values(), []), :]].groupby(level=('subject', 'task'), group_keys=True).apply(_regress)
