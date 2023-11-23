@@ -21,4 +21,5 @@ dependencies:
   - ipykernel
   - pip:
     - tdt
+    - rpy2
 

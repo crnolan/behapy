@@ -7,6 +7,7 @@ from behapy.utils import load_preprocessed_experiment
 from behapy.events import build_design_matrix, regress, find_events
 import statsmodels.api as sm
 import seaborn as sns
+from rpy2 import robjects # for running fastFMM in R
 sns.set_theme()
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
@@ -88,6 +89,18 @@ dm_filt = design_matrix.loc[idx[:, :, ['FI15', 'RR5', 'RR10'], :, :, :], :].sort
 
 def _regress(df):
     return regress(df, dff.loc[df.index, 'dff'], min_events=25)
+
+# %%
+r_script = '''
+
+library(fastFMM)
+
+# CODE HERE
+
+'''
+
+r_result = robjects.r(r_script)
+
 
 
 # %%
