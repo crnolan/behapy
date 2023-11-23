@@ -7,12 +7,13 @@ from behapy.utils import load_preprocessed_experiment
 from behapy.events import build_design_matrix, regress, find_events
 import statsmodels.api as sm
 import seaborn as sns
+from rpy2 import robjects # for running fastFMM in R
 sns.set_theme()
 
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 # %%
-BIDSROOT = Path('..')
+BIDSROOT = Path('/Users/uqdkilpa/Desktop/behapy/data')
 pre = load_preprocessed_experiment(BIDSROOT)
 dff_id = ['subject', 'session', 'task', 'run', 'label']
 dff_recordings = pre.recordings.loc[:, dff_id].drop_duplicates()
@@ -83,11 +84,23 @@ design_matrix = dff_recordings.groupby(dff_id).apply(_build_design_matrix).filln
 
 # %%
 idx = pd.IndexSlice
-dm_filt = design_matrix.loc[idx[:, :, ['FI15', 'RR5', 'RR10'], :, :, :], :].sort_index()
+dm_filt = design_matrix.loc[idx[:, :, ['FI15', 'RR5'], :, :, :], :].sort_index()
 
 
 def _regress(df):
     return regress(df, dff.loc[df.index, 'dff'], min_events=25)
+
+# %%
+r_script = '''
+
+library(fastFMM)
+
+# CODE HERE
+
+'''
+
+r_result = robjects.r(r_script)
+
 
 
 # %%
