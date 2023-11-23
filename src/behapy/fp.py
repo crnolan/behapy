@@ -449,7 +449,7 @@ def preprocess(root, subject, session, task, run, label):
     try:
         dff.to_parquet(data_fn, engine='pyarrow')
     except TypeError as e:
-        logging.error(f"Serialization error with pyarrow: {e}")
+        logging.warning(f"Serialization error with pyarrow: {e}")
         dff.to_parquet(data_fn, engine='fastparquet')
     meta = dff.attrs
     meta['root'] = str(root)
