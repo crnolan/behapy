@@ -73,6 +73,54 @@ event_ids_of_interest = sum(plot_meta.values(), [])
 events_of_interest = events.loc[events.event_id.isin(event_ids_of_interest), :]
 
 # %%
+def _build_fmm_matrix(ev, dff):
+    """
+    Reshape the data into the format requred by the fastFMM R package:
+    Format: animal | trial | condition | Y.1 ... Y.48
+    """
+
+    ev = ev.reset_index(['subject', 'session', 'task', 'run', 'label', 'onset'])
+    ev.onset = pd.to_timedelta(ev.onset).apply(lambda td: td.total_seconds())
+    ev['condition'] = (ev.event_id=='REWmag').astype('int')
+
+    # prepare the resulting data frame
+    fastfmm_data = pd.DataFrame(columns=['id', 'trial', 'treatment'] + [f'Y.{i+1}' for i in range(48)])
+
+    # counnters and helper variables
+    idx = pd.IndexSlice
+    last_subject = None
+    last_session = None
+    session_counter = 0
+
+    # run a loop over all events in the data
+    for event_id, (event_idx, event) in enumerate(ev.iterrows()):
+        if event_id % 1000 == 0: print(f'{event_id} / {ev.shape[0]}')
+        
+        # if we've switched to a new subject reset the session counter
+        if last_subject != event.subject:
+            session_counter = 0
+            last_subject = event.subject
+            last_session = None
+            
+        # if we've switched to a new session increase the session counter
+        if last_session != event.session:
+            session_counter += 1
+            last_session = event.session
+    
+        # add this event's data row to the final data frame
+        row = [event.subject, session_counter, event.condition] + list(dff.loc[idx[event.subject, event.session, event.task, event.run, event.label, (event.onset - 1.0):(event.onset + 2.0 + 0.2)], 'dff'][:48])
+        fastfmm_data.loc[len(fastfmm_data.index)] = row
+
+    return fastfmm_data
+
+# %%
+fastfmm_matrix = _build_fmm_matrix(ev=events_of_interest, dff=dff)
+BIDSROOT.joinpath('derivatives', 'fmm').mkdir(parents=True, exist_ok=True)
+fastfmm_matrix.to_csv(BIDSROOT/'derivatives'/'fmm'/'fastfmm_data.csv', index = False)
+
+
+
+# %%
 def _build_design_matrix(row):
     r = row.iloc[0]
     return build_design_matrix(
