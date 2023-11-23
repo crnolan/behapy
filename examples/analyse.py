@@ -50,12 +50,12 @@ def _get_nonevent(events, sub_events):
 REWmag = find_events(events, 'mag', ['pel', 'suc'])
 NOREWmag = _get_nonevent(events.loc[events.event_id == 'mag', :], REWmag)
 first_ipsilp = find_events(events, 'ipsilp', ['ipsilp', 'contralp', 'mag'], allow_exact_matches=False)
-# first_ipsilp = first_ipsilp.loc[first_ipsilp.latency < pd.to_timedelta('2s')]
-first_ipsilp = first_ipsilp.loc[first_ipsilp.latency < 2]
+first_ipsilp = first_ipsilp.loc[first_ipsilp.latency < pd.to_timedelta('2s')]
+# first_ipsilp = first_ipsilp.loc[first_ipsilp.latency < 2]
 notfirst_ipsilp = _get_nonevent(events.loc[events.event_id == 'ipsilp', :], first_ipsilp)
 first_contralp = find_events(events, 'contralp', ['ipsilp', 'contralp', 'mag'], allow_exact_matches=False)
-# first_contralp = first_contralp.loc[first_contralp.latency < pd.to_timedelta('2s')]
-first_contralp = first_contralp.loc[first_contralp.latency < 2]
+first_contralp = first_contralp.loc[first_contralp.latency < pd.to_timedelta('2s')]
+# first_contralp = first_contralp.loc[first_contralp.latency < 2]
 notfirst_contralp = _get_nonevent(events.loc[events.event_id == 'contralp', :], first_contralp)
 new_events = pd.concat([REWmag, NOREWmag, first_ipsilp, notfirst_ipsilp, first_contralp, notfirst_contralp],
                        keys=['REWmag', 'NOREWmag', 'first_ipsilp', 'notfirst_ipsilp', 'first_contralp', 'notfirst_contralp'],
