@@ -13,7 +13,7 @@ sns.set_theme()
 logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
 
 # %%
-BIDSROOT = Path('/Users/uqdkilpa/Desktop/behapy/data')
+BIDSROOT = Path('..')
 pre = load_preprocessed_experiment(BIDSROOT)
 dff_id = ['subject', 'session', 'task', 'run', 'label']
 dff_recordings = pre.recordings.loc[:, dff_id].drop_duplicates()
@@ -84,7 +84,7 @@ design_matrix = dff_recordings.groupby(dff_id).apply(_build_design_matrix).filln
 
 # %%
 idx = pd.IndexSlice
-dm_filt = design_matrix.loc[idx[:, :, ['FI15', 'RR5'], :, :, :], :].sort_index()
+dm_filt = design_matrix.loc[idx[:, :, ['FI15', 'RR5', 'RR10'], :, :, :], :].sort_index()
 
 
 def _regress(df):
