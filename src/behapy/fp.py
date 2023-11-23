@@ -446,7 +446,11 @@ def preprocess(root, subject, session, task, run, label):
     meta_fn = get_preprocessed_fibre_path(
         root, subject, session, task, run, label, 'json')
     data_fn.parent.mkdir(parents=True, exist_ok=True)
-    dff.to_parquet(data_fn)
+    try:
+        dff.to_parquet(data_fn, engine='pyarrow')
+    except TypeError as e:
+        logging.error(f"Serialization error with pyarrow: {e}")
+        dff.to_parquet(data_fn, engine='fastparquet')
     meta = dff.attrs
     meta['root'] = str(root)
     with open(meta_fn, 'w') as file:
