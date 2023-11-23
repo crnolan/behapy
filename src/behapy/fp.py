@@ -447,15 +447,17 @@ def preprocess(root, subject, session, task, run, label):
         root, subject, session, task, run, label, 'json')
     data_fn.parent.mkdir(parents=True, exist_ok=True)
     try:
-      dff.to_parquet(data_fn, engine='pyarrow')
+        dff.to_parquet(data_fn, engine='pyarrow')
     except TypeError as e:
-      print(f"Serialization error with pyarrow: {e}")
-      try:
-        dff.to_parquet(data_fn, engine='fastparquet')
-      except Exception as e:
-        print(f"Error with fastparquet: {e}")
+        logging.error(f"Serialization error with pyarrow: {e}")
+        try:
+            dff.to_parquet(data_fn, engine='fastparquet')
+        except Exception as e:
+            logging.error(f"Error with fastparquet: {e}")
+            raise
     except Exception as e:
-      print(f"An unexpected error occurred: {e}")
+        logging.error(f"An unexpected error occurred: {e}")
+        raise
     meta = dff.attrs
     meta['root'] = str(root)
     with open(meta_fn, 'w') as file:
