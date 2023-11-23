@@ -18,7 +18,7 @@ library(gridExtra)
 library(Rfast)
 library(fastFMM)
 
-dat <- read.csv("/Users/uqdkilpa/Documents/Code/Clones/fastFMM/vignettes/time_series.csv")
+dat <- read.csv("..")
 dat
 
 
