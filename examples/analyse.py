@@ -116,7 +116,7 @@ def _build_fmm_matrix(ev, dff):
 # %%
 fastfmm_matrix = _build_fmm_matrix(ev=events_of_interest, dff=dff)
 BIDSROOT.joinpath('derivatives', 'fmm').mkdir(parents=True, exist_ok=True)
-fastfmm_matrix.to_csv(BIDSROOT/'derivatives'/'fmm'/'fastfmm_data.csv', index = False)
+fastfmm_matrix.to_csv(BIDSROOT/'derivatives'/'fmm'/'fastfmm_data.csv', index=False)
 
 
 
