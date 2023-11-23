@@ -188,10 +188,14 @@ class PreprocessDashboard(param.Parameterized):
         return pn.Row(
             pn.Column(
                 self.create_tabulator_widget(),
-                self.create_reset_intervals_button()
+                self.create_reset_intervals_button(),
+                sizing_mode='stretch_height',
+                min_height=600
             ),
             pn.Column(
-                self.plot_all
+                self.plot_all,
+                sizing_mode='stretch_both'
             ),
-            styles=dict(background='WhiteSmoke')
+            styles=dict(background='WhiteSmoke'),
+             sizing_mode='stretch_both'
         )
