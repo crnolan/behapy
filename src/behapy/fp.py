@@ -450,14 +450,7 @@ def preprocess(root, subject, session, task, run, label):
         dff.to_parquet(data_fn, engine='pyarrow')
     except TypeError as e:
         logging.error(f"Serialization error with pyarrow: {e}")
-        try:
-            dff.to_parquet(data_fn, engine='fastparquet')
-        except Exception as e:
-            logging.error(f"Error with fastparquet: {e}")
-            raise
-    except Exception as e:
-        logging.error(f"An unexpected error occurred: {e}")
-        raise
+        dff.to_parquet(data_fn, engine='fastparquet')
     meta = dff.attrs
     meta['root'] = str(root)
     with open(meta_fn, 'w') as file:
