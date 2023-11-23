@@ -32,17 +32,17 @@ Write the preprocessed data to the `derivatives/preprocess` tree:
 
 ## Contributors
 
-behapy is maintained by [@crnolan].
+behapy is maintained by [Chris Nolan](https://github.com/crnolan).
 
 Open source projects could not exist without the energetic work from all the wonderful community. Thanks in particular to:
 
-* Thomas Burton [@thomasjburton]
-* Karly Turner [@karlyturner]
-* Phil JRDB [@philjrdb]
-* Dylan Black [@dylanablack]
-* Ilya Kuzovkin [@kuz]
-* Daniel Naoumenko [@dnao]
-* Almudena Ramirez [@almudena607]
-* Joanne Gladding [@jmgladding]
-* Lydia Barnes [@lydiabarnes01]
+* [Thomas Burton](https://github.com/thomasjburton)
+* [Karly Turner](https://github.com/karlyturner)
+* [Phil JRDB](https://github.com/philjrdb)
+* [Dylan Black](https://github.com/dylanablack)
+* [Ilya Kuzovkin](https://github.com/kuz)
+* [Daniel Naoumenko](https://github.com/dnao)
+* [Almudena Ramirez](https://github.com/almudena607)
+* [Joanne Gladding](https://github.com/jmgladding)
+* [Lydia Barnes](https://github.com/lydiabarnes01)
 * J Bertran-Gonzalez
