@@ -25,6 +25,16 @@ def load_events(root: Path,
         run (str): run ID
     """
     events_path = get_events_path(root, subject, session, task, run)
+
+    """Locate the events from the BIDS root directory.
+    
+    Args:
+     root (Path): path to the root of the BIDS dataset
+     subject (str): subject ID
+     session (str): session ID
+     task (str): task ID
+     run (str): run ID
+    """
     if not events_path.exists():
         raise ValueError(f'Events file {events_path} does not exist')
     events = pd.read_csv(events_path, index_col=0)
@@ -109,7 +119,7 @@ def _find_nearest(origin, fit):
     second['nearest'] = False
     second.loc[first['origin'], 'nearest'] = True
     return second['nearest'].to_numpy()
-
+    
 
 def _build_single_regressor(data: pd.DataFrame,
                             events: pd.Series,
@@ -132,6 +142,14 @@ def _build_single_regressor(data: pd.DataFrame,
 def build_design_matrix(data: pd.DataFrame,
                         events: pd.DataFrame,
                         window: Tuple[float, float]) -> pd.DataFrame:
+    
+    """Builds the design matrix.
+    Args:
+        data: preprocessed signal
+        events: behavioural events (eg. lp, pel)
+        window: time window either side of the event (eg. -20 to 10s)
+    """
+
     regressor_dfs = []
     for event in events.event_id.unique():
         matrix, offsets = _build_single_regressor(
@@ -149,6 +167,13 @@ def build_design_matrix(data: pd.DataFrame,
 def regress(design_matrix: pd.DataFrame,
             data: pd.DataFrame,
             min_events=50) -> pd.Series:
+    """OLS regression based on data in the design matrix.
+    Args:
+        design_matrix: the matrix of all events
+        data: preprocessed signal
+        min_events: lower cut-off to remove infreqent events
+    """
+
     dm = design_matrix.loc[:, design_matrix.sum() > min_events]
     if dm.empty:
         return pd.Series(dtype=float, index=dm.columns)
