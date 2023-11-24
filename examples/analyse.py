@@ -92,22 +92,74 @@ def _regress(df):
     return regress(df, dff.loc[df.index, 'dff'], min_events=25)
 
 # %%
-
 # activate R magic
 pandas2ri.activate()
 
-# define the path to the R script
-r_file_path = '..'
+# # path to R
+# r_file_path = '..' # add path
+# # open the file and read it into a string
+# with open(r_file_path, 'r') as file:
+#     r_script_string = file.read()
 
-# open the file and read it into a string
-with open(r_file_path, 'r') as file:
-    r_script_string = file.read()
- 
-r_result = robjects.r(r_script_string)
-r_dataframe = robjects.r['dat'] # retrieve R dataframe assigned to 'dat'. 
-pd_dataframe = pandas2ri.rpy2py(r_dataframe) # convert to pandas dataframe
+# code temporarily stored in this string, move to file later
+r_code = '''
+suppressPackageStartupMessages(library(lme4))
+suppressPackageStartupMessages(library(parallel))
+suppressPackageStartupMessages(library(cAIC4))
+suppressPackageStartupMessages(library(magrittr))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(mgcv))
+suppressPackageStartupMessages(library(MASS))
+suppressPackageStartupMessages(library(lsei))
+suppressPackageStartupMessages(library(refund))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(Matrix))
+suppressPackageStartupMessages(library(mvtnorm))
+suppressPackageStartupMessages(library(arrangements))
+suppressPackageStartupMessages(library(progress))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(gridExtra))
+suppressPackageStartupMessages(library(Rfast))
+suppressPackageStartupMessages(library(fastFMM))
 
-pd_dataframe.head()
+dat <- read.csv("/Users/uqdkilpa/Documents/Code/Clones/fastFMM/vignettes/time_series.csv")
+
+mod <- fui(Y ~ treatment + # main effect of cue
+              (treatment | id),  # random slope & intercept
+              data = dat,
+              parallel = TRUE,
+              analytic = FALSE) # bootstrap
+
+mod_qn <- mod$qn
+mod_resid <- mod$residuals
+mod_bootsamps <- mod$bootstrap_samps
+mod_argvals <- mod$argvals
+mod_aic <- mod$aic
+mod_betahat <- mod$betaHat
+mod_betahatvar <- mod$betaHat.var
+'''
+
+# execute the string in R
+robjects.r(r_code)
+
+# collect aic/bic 
+mod_aic = pd.DataFrame(robjects.r['mod_aic'])
+mod_aic.columns = ['AIC', 'BIC', 'cAIC']
+
+# collect qn 
+mod_qn = robjects.r['mod_qn'] 
+
+# collect bootstrap samples
+mod_bootsamps = robjects.r['mod_bootsamps']
+
+# collect argument values
+mod_argvals = np.array(robjects.r['mod_argvals'])
+
+# collect coefficients
+mod_betaHat = pd.DataFrame(robjects.r['mod_betahat'])
+
+# collect coefficient variances
+mod_betahat_var = np.array(robjects.r['mod_betahatvar'])
 
 # %%
 r1 = dm_filt.loc[:, idx[sum(plot_meta.values(), []), :]].groupby(level=('subject', 'task'), group_keys=True).apply(_regress)
