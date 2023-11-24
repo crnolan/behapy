@@ -124,7 +124,8 @@ fastfmm_matrix = _build_fmm_matrix(ev=events_of_interest, dff=dff)
 
 # %%
 BIDSROOT.joinpath('derivatives', 'fmm').mkdir(parents=True, exist_ok=True)
-fastfmm_matrix.to_csv(BIDSROOT/'derivatives'/'fmm'/'rats15_megrew_sessions_trials.csv', index=False)
+fmm_out_file = BIDSROOT/'derivatives'/'fmm'/'rats15_megrew_sessions_trials.csv'
+fastfmm_matrix.to_csv(fmm_out_file, index=False)
 
 
 
@@ -151,52 +152,28 @@ def _regress(df):
 # activate R magic
 pandas2ri.activate()
 
-# # path to R
-# r_file_path = '..' # add path
-# # open the file and read it into a string
-# with open(r_file_path, 'r') as file:
-#     r_script_string = file.read()
+# %%
+# Run the R script
+# See https://rpubs.com/gloewinger/1110512 for instructions on running fastFMM
 
-# code temporarily stored in this string, move to file later
-r_code = '''
-suppressPackageStartupMessages(library(lme4))
-suppressPackageStartupMessages(library(parallel))
-suppressPackageStartupMessages(library(cAIC4))
-suppressPackageStartupMessages(library(magrittr))
-suppressPackageStartupMessages(library(dplyr))
-suppressPackageStartupMessages(library(mgcv))
-suppressPackageStartupMessages(library(MASS))
-suppressPackageStartupMessages(library(lsei))
-suppressPackageStartupMessages(library(refund))
-suppressPackageStartupMessages(library(stringr))
-suppressPackageStartupMessages(library(Matrix))
-suppressPackageStartupMessages(library(mvtnorm))
-suppressPackageStartupMessages(library(arrangements))
-suppressPackageStartupMessages(library(progress))
-suppressPackageStartupMessages(library(ggplot2))
-suppressPackageStartupMessages(library(gridExtra))
-suppressPackageStartupMessages(library(Rfast))
-suppressPackageStartupMessages(library(fastFMM))
+# load R libraries
+with open('../etc/fastFMM_pre.r', 'r') as file:
+    r_script_pre = file.read()
+    robjects.r(r_script_pre)
 
-dat <- read.csv("..") # ADD PATH TO DATA FILE
+# read the data into R
+robjects.r(f'dat <- read.csv("{fmm_out_file}")')
 
-mod <- fui(Y ~ treatment + # main effect of cue
-              (treatment | id),  # random slope & intercept
-              data = dat,
-              parallel = TRUE,
-              analytic = FALSE) # bootstrap
+# fit the FMM model
+robjects.r('mod <- fui(Y ~ treatment + (1 | id), data=dat, parallel=TRUE, num_cores=4)')
 
-mod_qn <- mod$qn
-mod_resid <- mod$residuals
-mod_bootsamps <- mod$bootstrap_samps
-mod_argvals <- mod$argvals
-mod_aic <- mod$aic
-mod_betahat <- mod$betaHat
-mod_betahatvar <- mod$betaHat.var
-'''
+# reshape R output into covenient variables
+with open('../etc/fastFMM_post.r', 'r') as file:
+    r_script_post = file.read()
+    robjects.r(r_script_post)
 
-# execute the string in R
-robjects.r(r_code)
+# %%
+# Collect R varibles back into Python
 
 # collect aic/bic 
 mod_aic = pd.DataFrame(robjects.r['mod_aic'])
