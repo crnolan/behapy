@@ -29,3 +29,20 @@ Open the preprocessing dashboard and confirm rejected regions of the recording:
 Write the preprocessed data to the `derivatives/preprocess` tree:
 
 `preprocess [bidsroot]`
+
+## Contributors
+
+behapy is maintained by [Chris Nolan](https://github.com/crnolan).
+
+Open source projects could not exist without the energetic work from all the wonderful community. Thanks in particular to:
+
+* [Thomas Burton](https://github.com/thomasjburton)
+* [Karly Turner](https://github.com/karlyturner)
+* [Phil JRDB](https://github.com/philjrdb)
+* [Dylan Black](https://github.com/dylanablack)
+* [Ilya Kuzovkin](https://github.com/kuz)
+* [Daniel Naoumenko](https://github.com/dnao)
+* [Almudena Ramirez](https://github.com/almudena607)
+* [Joanne Gladding](https://github.com/jmgladding)
+* [Lydia Barnes](https://github.com/lydiabarnes01)
+* J Bertran-Gonzalez
