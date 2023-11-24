@@ -1,27 +1,23 @@
-# Load libraries
-# The issue here is that the user will need R with these packages installed
-# I tried with the vignette example but this resulted in some weird hiragana outputs?
-library(lme4)
-library(parallel)
-library(cAIC4)
-library(magrittr)
-library(dplyr)
-library(mgcv) 
-library(MASS)
-library(lsei) 
-library(refund)
-library(stringr) 
-library(Matrix) 
-library(mvtnorm) 
-library(arrangements) 
-library(progress) 
-library(ggplot2)
-library(gridExtra)
-library(Rfast)
-library(fastFMM)
+suppressPackageStartupMessages(library(lme4))
+suppressPackageStartupMessages(library(parallel))
+suppressPackageStartupMessages(library(cAIC4))
+suppressPackageStartupMessages(library(magrittr))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(mgcv))
+suppressPackageStartupMessages(library(MASS))
+suppressPackageStartupMessages(library(lsei))
+suppressPackageStartupMessages(library(refund))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(Matrix))
+suppressPackageStartupMessages(library(mvtnorm))
+suppressPackageStartupMessages(library(arrangements))
+suppressPackageStartupMessages(library(progress))
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(gridExtra))
+suppressPackageStartupMessages(library(Rfast))
+suppressPackageStartupMessages(library(fastFMM))
 
-dat <- read.csv("")
-dat
+dat <- read.csv("/Users/uqdkilpa/Documents/Code/Clones/fastFMM/vignettes/time_series.csv")
 
 mod <- fui(Y ~ treatment + # main effect of cue
               (treatment | id),  # random slope & intercept
@@ -29,15 +25,10 @@ mod <- fui(Y ~ treatment + # main effect of cue
               parallel = TRUE,
               analytic = FALSE) # bootstrap
 
-align_time <- 1 # cue onset is at 2 seconds
-sampling_Hz <- 15 # sampling rate
-# plot titles: interpretation of beta coefficients
-plot_names <- c("Intercept", "Mean Signal Difference: Cue1 - Cue0") 
-fui_plot <- plot_fui(mod, # model fit object
-                     x_rescale = sampling_Hz, # rescale x-axis to sampling rate
-                     align_x = align_time, # align to cue onset
-                     title_names = plot_names,
-                     xlab = "Time (s)",
-                     num_row = 2)
-
-
+mod_qn <- mod$qn
+mod_resid <- mod$residuals
+mod_bootsamps <- mod$bootstrap_samps
+mod_argvals <- mod$argvals
+mod_aic <- mod$aic
+mod_betahat <- mod$betaHat
+mod_betahatvar <- mod$betaHat.var
