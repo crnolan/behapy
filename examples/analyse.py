@@ -170,7 +170,7 @@ suppressPackageStartupMessages(library(gridExtra))
 suppressPackageStartupMessages(library(Rfast))
 suppressPackageStartupMessages(library(fastFMM))
 
-dat <- read.csv("/Users/uqdkilpa/Documents/Code/Clones/fastFMM/vignettes/time_series.csv")
+dat <- read.csv("..") # ADD PATH TO DATA FILE
 
 mod <- fui(Y ~ treatment + # main effect of cue
               (treatment | id),  # random slope & intercept
