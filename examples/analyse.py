@@ -98,19 +98,19 @@ def _build_fmm_matrix(ev, dff):
     # run a loop over all events in the data
     for event_id, (event_idx, event) in enumerate(ev.iterrows()):
         if event_id % 1000 == 0: print(f'{event_id} / {ev.shape[0]}')
-        
+
         # if we've switched to a new subject reset the session counter
         if last_subject != event.subject:
             session_counter = 0
             last_subject = event.subject
             last_session = None
-            
+
         # if we've switched to a new session increase the session counter
         if last_session != event.session:
             session_counter += 1
             last_session = event.session
             trial_counter = 0
-    
+
         trial_counter += 1
 
         # add this event's data row to the final data frame
@@ -175,12 +175,12 @@ with open('../etc/fastFMM_post.r', 'r') as file:
 # %%
 # Collect R varibles back into Python
 
-# collect aic/bic 
+# collect aic/bic
 mod_aic = pd.DataFrame(robjects.r['mod_aic'])
 mod_aic.columns = ['AIC', 'BIC', 'cAIC']
 
-# collect qn 
-mod_qn = robjects.r['mod_qn'] 
+# collect qn
+mod_qn = robjects.r['mod_qn']
 
 # collect bootstrap samples
 mod_bootsamps = robjects.r['mod_bootsamps']
@@ -193,6 +193,26 @@ mod_betaHat = pd.DataFrame(robjects.r['mod_betahat'])
 
 # collect coefficient variances
 mod_betahat_var = np.array(robjects.r['mod_betahatvar'])
+
+# %%
+lower = mod_betaHat - 2*np.sqrt(np.diagonal(mod_betahat_var, 0, 0, 1))
+upper = mod_betaHat + 2*np.sqrt(np.diagonal(mod_betahat_var, 0, 0, 1))
+lowerj = mod_betaHat - mod_qn[:, np.newaxis]*np.sqrt(np.diagonal(mod_betahat_var, 0, 0, 1))
+upperj = mod_betaHat + mod_qn[:, np.newaxis]*np.sqrt(np.diagonal(mod_betahat_var, 0, 0, 1))
+
+beta_df = mod_betaHat.stack()
+beta_df.name = 'beta'
+beta_df = beta_df.to_frame()
+beta_df['lower'] = lower.stack()
+beta_df['upper'] = upper.stack()
+beta_df['lowerj'] = lowerj.stack()
+beta_df['upperj'] = upperj.stack()
+beta_df.index.names = ['level', 'offset']
+
+# %%
+import seaborn.objects as so
+p1 = so.Plot(beta_df.reset_index(), x='offset', y='beta', ymin='lower', ymax='upper').facet(row='level')
+p1.add(so.Band()).add(so.Line())
 
 # %%
 r1 = dm_filt.loc[:, idx[sum(plot_meta.values(), []), :]].groupby(level=('subject', 'task'), group_keys=True).apply(_regress)
