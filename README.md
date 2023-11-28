@@ -34,7 +34,7 @@ Write the preprocessed data to the `derivatives/preprocess` tree:
 
 behapy is maintained by [Chris Nolan](https://github.com/crnolan).
 
-Open source projects could not exist without the energetic work from all the wonderful community. Thanks in particular to:
+This project would not exist without the energetic contributions from folks in the BrainHack community. Thanks in particular to:
 
 * [Thomas Burton](https://github.com/thomasjburton)
 * [Karly Turner](https://github.com/karlyturner)
