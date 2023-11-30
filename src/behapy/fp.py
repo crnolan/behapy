@@ -40,7 +40,17 @@ def load_channel(root, subject, session, task, run, label, channel):
 
 
 def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
+   
     """Load a raw signal, including the isosbestic channel if present.
+       
+    Args:
+        root (Path): path to the root of the BIDS dataset
+        subject (str): subject ID
+        session (str): session ID
+        task (str): task ID
+        run (str): run ID
+        label (str): label ID
+        iso_channel: set value eg 'iso'
     """
     root = Path(root).absolute()
     recordings = pd.DataFrame(
@@ -128,6 +138,12 @@ def load_signal(root, subject, session, task, run, label, iso_channel='iso'):
 
 
 def downsample(signal, factor=None):
+    """Downsampling of the data.
+
+    Args:
+     signal: concat data
+     factor: set to None for use in function below
+    """
     if factor is None:
         # Downsample to something reasonable
         factor = 1
@@ -144,6 +160,17 @@ def downsample(signal, factor=None):
 
 
 def save_rejections(tree, root, subject, session, task, run, label):
+    """Save the provided IntervalTree as a csv.
+
+    Args:
+        tree: from IntervalTree import?
+        root (Path): path to the root of the BIDS dataset
+        subject (str): subject ID
+        session (str): session ID
+        task (str): task ID
+        run (str): run ID
+        label (str): label ID
+    """
     # Save the provided IntervalTree as a CSV
     fn = get_rejected_intervals_path(root, subject, session, task, run,
                                      label)
@@ -155,7 +182,16 @@ def save_rejections(tree, root, subject, session, task, run, label):
 
 
 def load_rejections(root, subject, session, task, run, label):
-    # Load rejected intervals if present
+    """Load rejected intervals if present.
+
+    Args:
+        root (Path): path to the root of the BIDS dataset
+        subject (str): subject ID
+        session (str): session ID
+        task (str): task ID
+        run (str): run ID
+        label (str): label ID
+    """
     fn = get_rejected_intervals_path(root, subject, session, task, run,
                                      label)
     intervals = []
@@ -168,13 +204,18 @@ def load_rejections(root, subject, session, task, run, label):
 
 
 def find_discontinuities(signal, mean_window=3, std_window=30, nstd_thresh=2):
-    # This currently relies on the isobestic channel being valid.
+    """Find discontinuities in the signal.
 
-    # How many samples to consider for the sliding mean
+    Args:
+        signal: concat data
+        mean_window: how many samples to consider for the sliding mean
+        std_window: ?
+        nstd_thresh: ?
+    Uses the median of a sliding window STD as characteristic STD.
+    Currently relies on the isobestic channel being valid.
+    Assume that the std of the iso channel is constant.
+    """
     n = int(signal.attrs['fs'] * mean_window)
-    # Assume that the STD of the iso channel is constant. We can
-    # then use the median of a sliding window STD as our
-    # characteristic STD.
     std_n = int(signal.attrs['fs'] * std_window)
     # iso_rstds = np.std(sliding_window_view(site.iso(), std_n), axis=-1)
     data = signal[signal.attrs['channel']].to_numpy()
@@ -225,6 +266,15 @@ def find_discontinuities(signal, mean_window=3, std_window=30, nstd_thresh=2):
 
 def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
                      nstd_thresh=2):
+    """Find disconnections in the signal.
+
+    Args:
+        signal: concat data
+        zero_nstd_thresh: ?
+        mean_window: how many samples to consider for the sliding mean
+        std_window:?
+        nstd_thresh: ?
+    """
     bounds = find_discontinuities(signal, mean_window=mean_window,
                                   std_window=std_window, nstd_thresh=nstd_thresh)
     # data = signal[signal.attrs['iso_channel']].to_numpy()
@@ -416,6 +466,17 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
 
 
 def preprocess(root, subject, session, task, run, label):
+    """Load preprocessed data.
+
+    Args:
+        root (Path): path to the root of the BIDS dataset
+        subject (str): subject ID
+        session (str): session ID
+        task (str): task ID
+        run (str): run ID
+        label (str): label ID
+    """
+    
     config = load_preprocess_config(root)
     intervals = load_rejections(root, subject, session, task, run, label)
     # Check if the recording has rejections saved
