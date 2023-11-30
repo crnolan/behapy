@@ -470,6 +470,9 @@ def load_preprocessed_fibre(root, subject, session, task, run, label):
     if data.index.name != 'time':
         data.index = pd.to_timedelta(data.index, unit='s')
         data.index.name = 'time'
+    if not pd.api.types.is_timedelta64_dtype(data.index):
+        data.index = pd.to_timedelta(data.index, unit='s')
+        data.index.name = 'time'
     with open(meta_fn, 'r') as file:
         meta = json.load(file)
     data.attrs.update(meta)
