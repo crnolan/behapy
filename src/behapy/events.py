@@ -181,6 +181,17 @@ def _build_single_ert(data: pd.DataFrame,
             mask = event_mask
         values = data.loc[mask, ch].to_numpy()
         values_mask = data.loc[mask, 'mask'].to_numpy()
+        if matrix[:, i].shape != values.shape:
+            if offset < 0:
+                values = np.concatenate([np.array([np.nan] * (matrix[:, i].shape[0] - values.shape[0])),
+                                         values])
+                values_mask = np.concatenate([np.array([False] * (matrix[:, i].shape[0] - values_mask.shape[0])),
+                                              values_mask])
+            else:
+                values = np.concatenate([values,
+                                         np.array([np.nan] * (matrix[:, i].shape[0] - values.shape[0]))])
+                values_mask = np.concatenate([values_mask,
+                                              np.array([False] * (matrix[:, i].shape[0] - values_mask.shape[0]))])
         matrix[:, i] = values
         matrix[~values_mask, i] = np.nan
     return matrix, offsets
