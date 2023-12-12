@@ -97,3 +97,6 @@ def list_preprocessed(root, subject='*', session='*', task='*', run='*',
 def get_session_meta_path(root):
     return Path(root) / 'session-meta.csv'
 
+
+def preprocess_config_path(root):
+    return Path(root) / 'etc/preprocess.json'

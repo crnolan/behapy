@@ -160,3 +160,55 @@ def regress(design_matrix: pd.DataFrame,
     fitted.attrs['rsquared_adj'] = lr.rsquared_adj
     return fitted
 
+
+def _build_single_ert(data: pd.DataFrame,
+                      events: pd.Series,
+                      window: Tuple[float, float]) -> \
+                       Tuple[np.ndarray, np.ndarray]:
+    ch = set(data.columns).difference(['mask']).pop()
+    event_mask = np.array(_find_nearest(data.index, events.index))
+    window_indices = np.round(np.array(window) * data.attrs['fs']).astype(int)
+    offsets = np.arange(*window_indices)
+    matrix = np.zeros((events.shape[0], offsets.shape[0]))
+    for i, offset in enumerate(offsets):
+        if offset > 0:
+            mask = np.concatenate([np.array([False] * offset),
+                                   event_mask[:-offset]])
+        elif offset < 0:
+            mask = np.concatenate([event_mask[np.abs(offset):],
+                                   np.array([False] * np.abs(offset))])
+        else:
+            mask = event_mask
+        values = data.loc[mask, ch].to_numpy()
+        values_mask = data.loc[mask, 'mask'].to_numpy()
+        if matrix[:, i].shape != values.shape:
+            if offset < 0:
+                values = np.concatenate([np.array([np.nan] * (matrix[:, i].shape[0] - values.shape[0])),
+                                         values])
+                values_mask = np.concatenate([np.array([False] * (matrix[:, i].shape[0] - values_mask.shape[0])),
+                                              values_mask])
+            else:
+                values = np.concatenate([values,
+                                         np.array([np.nan] * (matrix[:, i].shape[0] - values.shape[0]))])
+                values_mask = np.concatenate([values_mask,
+                                              np.array([False] * (matrix[:, i].shape[0] - values_mask.shape[0]))])
+        matrix[:, i] = values
+        matrix[~values_mask, i] = np.nan
+    return matrix, offsets
+
+
+def build_ert_matrix(data: pd.DataFrame,
+                     events: pd.DataFrame,
+                     window: Tuple[float, float]) -> pd.DataFrame:
+    ert_dfs = []
+    for event in events.event_id.unique():
+        ev = events.loc[events.event_id == event]
+        matrix, offsets = _build_single_ert(
+            data, ev, window=window)
+        column_index = pd.MultiIndex.from_product(
+            [[event], offsets/data.attrs['fs']], names=('event', 'offset'))
+        _df = pd.DataFrame(matrix, dtype=float, index=ev.index,
+                           columns=column_index)
+        ert_dfs.append(_df)
+    df = pd.concat(ert_dfs, axis=1)
+    return df
