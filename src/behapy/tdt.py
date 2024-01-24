@@ -10,11 +10,15 @@ from collections import defaultdict
 from .pathutils import get_raw_fibre_path, get_events_path
 
 
-def load_session_tank_map(filename: str) -> pd.DataFrame:
+def load_session_tank_map(filename: str,
+                          sourcedata_root: str = None) -> pd.DataFrame:
     """Loads a file mapping sessions to the tank files.
 
     Args:
         filename (str): path to the session mapping file
+        sourcedata_root (str): path to which the entries in the sessions
+                               file are relative; if None, the location of
+                               the sessions file is used
     """
     dtypes = {
         'block': str,
@@ -28,8 +32,15 @@ def load_session_tank_map(filename: str) -> pd.DataFrame:
         'label': str
     }
     info = pd.read_csv(filename, dtype=dtypes)
-    resolved_path = Path(filename).resolve().parent
-    info.block = info.block.apply(lambda x: resolved_path / x)
+    filename_parent = Path(filename).resolve().parent
+    if sourcedata_root is None:
+        sourcedata_root = filename_parent
+    else:
+        sourcedata_root = Path(sourcedata_root)
+        if not sourcedata_root.is_absolute():
+            sourcedata_root = (filename_parent / sourcedata_root).resolve()
+
+    info.block = info.block.apply(lambda x: sourcedata_root / x)
     return info
 
 
@@ -116,3 +127,66 @@ def convert_block(df, root, event_names=None, invert_events=False):
                      axis=1)
         except FileNotFoundError:
             logging.warn('Cannot open block at path {}'.format(blocks[0]))
+
+
+def generate_session_map(root: str, files_from: str = None,
+                         stream_map: dict = None,
+                         epoc_map: dict = None) -> pd.DataFrame:
+    """Generates a session map table.
+
+    Given a root directory and optionally a relative path, generates a
+    list of entries for data streams and events files from each TDT
+    dataset.
+
+    Args:
+        root (str): path to the location that any files will be
+                    referenced from
+        files_from (str): path (relative to root) in which to search for
+                          TDT files
+
+    Returns:
+        A pandas DataFrame with the following columns:
+            block (str): path to the TDT block file, relative to root
+            subject (str): subject ID
+            session (str): session ID
+            task (str): task ID
+            run (str): run ID
+            type (str): type of data (stream or epoc)
+            tdt_id (str): TDT ID of the data
+            channel (str): channel name
+            label (str): label of the data
+    """
+    root = Path(root)
+    if files_from is None:
+        files_from = root
+    else:
+        files_from = root / files_from
+    files_from = files_from.resolve()
+    session_map = defaultdict(list)
+    for tev_path in files_from.glob('**/*.tev'):
+        block_path = tev_path.relative_to(root).parent
+        block = read_block(tev_path.parent)
+        streams = block.streams.keys() & stream_map.keys()
+        logging.info(f'Ignoring streams {block.streams.keys() - streams}')
+        epocs = block.epocs.keys() & epoc_map.keys()
+        for stream in streams:
+            session_map['block'].append(block_path)
+            session_map['subject'].append(block.info.subject)
+            session_map['session'].append(block.info.start_date.strftime('%Y%m%d_%H%M%S'))
+            session_map['task'].append('task')
+            session_map['run'].append('run')
+            session_map['type'].append('stream')
+            session_map['tdt_id'].append(stream)
+            session_map['channel'].append(stream_map[stream][0])
+            session_map['label'].append(stream_map[stream][1])
+        for epoc in epocs:
+            session_map['block'].append(block_path)
+            session_map['subject'].append(block.info.subject)
+            session_map['session'].append(block.info.start_date.strftime('%Y%m%d_%H%M%S'))
+            session_map['task'].append('task')
+            session_map['run'].append('run')
+            session_map['type'].append('epoc')
+            session_map['tdt_id'].append(epoc)
+            session_map['channel'].append('events')
+            session_map['label'].append(epoc_map[epoc])
+    return pd.DataFrame(session_map)

@@ -14,16 +14,23 @@ from .visuals import PreprocessDashboard
 from . import fp
 
 
-def tdt2bids(session_fn: str, experiment_fn: str, bids_root: str) -> None:
+def tdt2bids(session_fn: str,
+             experiment_fn: str,
+             bids_root: str,
+             sourcedata_root: str) -> None:
     """Convert TDT tanks into BIDS format.
 
     Args:
         session_fn: Map of the files to sessions
-        experiment_fn:
+        experiment_fn: JSON file with experiment details (currently event
+                       mapping)
         bids_root: Root path of the BIDS structure (data will be put in the
                    `rawdata` sub-folder of `bids_root`)
+        sourcedata_root: Path to which the entries in the sessions file are
+                         relative; if None, the location of the sessions file
+                         is used.
     """
-    session_df = load_session_tank_map(session_fn)
+    session_df = load_session_tank_map(session_fn, sourcedata_root)
     ep = load_experiment_params(experiment_fn)
     convert_block(session_df, Path(bids_root), ep['event_names'],
                   ep['invert_events'])
@@ -41,6 +48,10 @@ def tdt2bids_command():
     parser.add_argument('bids_root', type=str,
                         help='root path of the BIDS dataset (data will '
                              'be put in the rawdata sub-folder of bids_root)')
+    parser.add_argument('--sourcedata_root', type=str,
+                        help='path to which the entries in the sessions file '
+                             'are relative; by default the location of the '
+                             'sessions file')
     args = parser.parse_args()
     tdt2bids(**vars(args))
 
