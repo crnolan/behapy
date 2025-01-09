@@ -472,13 +472,21 @@ def fit_debleached(data, control):
     return data_lp - ols_model.fit().fittedvalues,
 
 
-def fit(signal):
-    """ Fit the site data to the isobestic channel. """
-    if signal.shape[1] != 2:
+def rlm(signal):
+    """ Fit the site data to the isobestic channel using a robust regression.
+    """
+    if len(signal.attrs['channels']) > 1:
         raise ValueError('Only one channel is supported.')
-    rlm_model = sm.RLM(signal[signal.attrs['channel']],
-                       signal[signal.attrs['iso_channel']])
-    return rlm_model.fit()
+    ch = signal.attrs['channels'][0]
+    iso = signal.attrs['artifact_channel']
+    df = signal.loc[signal['mask'], :]
+    fitted = series_like(signal, 'fitted')
+    fitted[signal['mask']] = sm.RLM(df[ch], df[iso]).fit().fittedvalues
+    fitted.attrs['channels'] = ['fitted']
+    dff = series_like(signal, ch)
+    dff[signal['mask']] = (df[ch] - fitted[signal['mask']]) / fitted[signal['mask']]
+    dff.attrs['channels'] = [ch]
+    return dff.to_frame(), fitted
 
 
 def normalise(signal, control, mask, fs, method='fit', detrend=True):
@@ -530,8 +538,11 @@ def preprocess(root, subject, session, task, run, label):
     # Let's just detrend and divide by the smoothed signal instead.
     # dff = fp.series_like(recording, name='dff')
     # dff.loc[rej.index] = fp.detrend(rej[ch])
-    dff = detrend(rej[ch], cutoff=config['detrend_cutoff'])
-    dff = dff / smooth(rej[ch])
+    if config['method'] == 'rlm':
+        dff, fitted = rlm(rej)
+    else:
+        dff = detrend(rej[ch], cutoff=config['detrend_cutoff'])
+        dff = dff / smooth(rej[ch])
     # dff.name = 'dff'
     # dff = dff.to_frame()
     dff['mask'] = rej['mask']

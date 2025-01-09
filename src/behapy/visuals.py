@@ -83,6 +83,7 @@ class PreprocessDashboard(param.Parameterized):
         self.metadata_table = recordings
         self.data_func = data_func
         self.bidsroot = bidsroot
+        self.config = load_preprocess_config(self.bidsroot)
         self.recording = None
         self.intervals = None
         self.regression = None
@@ -140,11 +141,13 @@ class PreprocessDashboard(param.Parameterized):
             ch = [self.recording.attrs['channel']]
         else:
             ch = self.recording.attrs['channels']
-        config = load_preprocess_config(self.bidsroot)
-        # We were doing a robust regression, but the fit isn't good enough.
-        # Let's just detrend and divide by the smoothed signal instead.
-        dff = fp.detrend(rej[ch], cutoff=config['detrend_cutoff'])
-        dff = dff / fp.smooth(rej[ch])
+        if self.config['method'] == 'rlm':
+            dff, fitted = fp.rlm(rej)
+        else:
+            # We were doing a robust regression, but the fit isn't good enough.
+            # Let's just detrend and divide by the smoothed signal instead.
+            dff = fp.detrend(rej[ch], cutoff=self.config['detrend_cutoff'])
+            dff = dff / fp.smooth(rej[ch])
         # dff.name = 'dff'
         self.dff = dff
         self.regression_update += 1

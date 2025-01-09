@@ -148,9 +148,11 @@ def preprocess(bidsroot):
     signals = recordings.loc[:, ['subject', 'session', 'task', 'run', 'label']].drop_duplicates()
 
     def save_recording(row):
-        return fp.preprocess(bidsroot, row.subject, row.session, row.task,
-                             row.run, row.label)
-
+        try:
+            fp.preprocess(bidsroot, row.subject, row.session, row.task,
+                          row.run, row.label)
+        except Exception as e:
+            logging.error('Error processing %s: %s', row, e)
     signals.apply(save_recording, axis=1)
 
 
