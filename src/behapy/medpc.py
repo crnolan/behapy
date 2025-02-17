@@ -1,16 +1,18 @@
 """Convert the bizarre MedPC output to a sane raw data structure
 """
-import warnings
+import logging
 from collections import namedtuple
 from typing import Tuple, Union, Any
 from datetime import datetime
+from pathlib import Path
 from string import ascii_uppercase
 import pandas as pd
+import re
 
 
 def experiment_info(variables: "dict[str, str]") -> pd.Series:
     """Parse the experiment infomation from variables.
-    
+
     Args:
         variables: A set of MedPC variables extracted via `parse_file`.
 
@@ -36,7 +38,7 @@ def get_events(timestamps: "list[str]",
                event_idxs: "list[str]",
                event_map: "dict[int, str]" = None) -> pd.DataFrame:
     """Parse string-encoded timestamps and events.
-    
+
     Args:
         timestamps: A list of strings of floats representing seconds as
             written by MedPC.
@@ -55,7 +57,7 @@ def get_events(timestamps: "list[str]",
             valid_events = True
             break
     if not valid_events:
-        warnings.warn('No valid events in list')
+        logging.warning('No valid events in list')
         return pd.DataFrame({'timestamp': [], 'event': []})
     for ts, event in zip(timestamps, event_idxs):
         if float(ts) - ts_prev < 0:
@@ -70,7 +72,7 @@ def get_events(timestamps: "list[str]",
     return pd.DataFrame(event_list,
                         columns=['timestamp', 'event'])
 
-    
+
 def parse_line(line: str, prev_token: str, prev_data: Any) -> Tuple[str, str]:
     if len(line.strip()) == 0:
         return None, None
@@ -96,3 +98,132 @@ def parse_file(filename: str) -> dict:
                 continue
             variables[token] = data
     return variables
+
+
+def generate_mapping(
+        sourcepath: Union[str, Path],
+        filename_re: str = r".*Subject (?P<subject>[^\.]+)\.txt",
+        msn_re: str = None,
+        subject: str = None,
+        session: str = None,
+        task: str = None,
+        run: str = None,
+        subject_map: dict[str, str] = {},
+        session_map: dict[str, str] = {},
+        task_map: dict[str, str] = {},
+        run_map: dict[str, str] = {}
+        ) -> pd.DataFrame:
+    """Generate a mapping of MedPC backup files to raw events files.
+
+    Args:
+        sourcepath: The location to search for MedPC backup files.
+        filename_re: A regular expression to extract variables from the
+            filenames.
+        msn_re: A regular expression to extract variables from the MSN
+            field of the backup files.
+        subject_map: A mapping of the subject field as extracted from
+            any regular expression to the subject identifier.
+        session_map: A mapping of the session field as extracted from
+            any regular expression to the session identifier.
+        task_map: A mapping of the task field as extracted from any
+            regular expression to the task identifier.
+        run_map: A mapping of the run field as extracted from any
+            regular expression to the run identifier.
+
+    Returns:
+        A `pd.DataFrame` with a row for each data file and columns for
+        subject, session, task and run.
+    """
+    sourcefiles = []
+    sourcepath = Path(sourcepath)
+    if not sourcepath.exists():
+        logging.error(f'Provided source path {sourcepath} does not exist')
+        return
+
+    for fn in sourcepath.glob('**/Backup of *Subject *.txt'):
+        # First match any regular expressions in the filename
+        match = re.search(filename_re, str(fn))
+        if not match:
+            logging.warning(f'Bad template match for {fn.name}')
+            continue
+        groups = match.groupdict()
+        if groups['subject']:
+            subject = match.groups()['subject'].lower()
+        if groups['session']:
+            session = match.groups()['session'].lower()
+        if groups['task']:
+            task = match.groups()['task'].lower()
+        if groups['run']:
+            run = match.groups()['run'].lower()
+        # Then match any regular expressions in the MSN field of the file
+        variables = parse_file(fn)
+        if msn_re:
+            match = re.search(msn_re, variables['MSN'])
+            if not match:
+                logging.warning(f'Bad MSN match for {fn.name}')
+                continue
+            groups = match.groupdict()
+            if groups['subject']:
+                subject = match.groups()['subject'].lower()
+            if groups['session']:
+                session = match.groups()['session'].lower()
+            if groups['task']:
+                task = match.groups()['task'].lower()
+            if groups['run']:
+                run = match.groups()['run'].lower()
+        if subject is None or session is None or task is None or run is None:
+            logging.warning(f'Incomplete subject/session information for '
+                            f'{fn.name}, skipping file')
+            continue
+        sourcefiles.append((fn, subject, session, task, run))
+    df = pd.DataFrame(sourcefiles,
+                      columns=['sourcefile', 'subject', 'session', 'task',
+                               'run'])
+    df['subject'] = df['subject'].map(subject_map)
+    df['session'] = df['session'].map(session_map)
+    df['task'] = df['task'].map(task_map)
+    df['run'] = df['run'].map(run_map)
+    return df
+
+
+def events_to_bids(bidsroot: Union[Path, str],
+                   sourcefile: Union[Path, str],
+                   subject: str,
+                   session: str,
+                   task: str,
+                   run: str,
+                   timestamp_var: str,
+                   event_var: str,
+                   event_map: dict[int, str] = None,
+                   postfix: str = 'events'):
+    """Convert a raw MedPC file to BIDS format.
+
+    The provided sourcefile will be converted into an events CSV file named
+    `sub-{subject}_ses-{session}_task-{task}_run-{run}_events.csv` in the
+    folder `$bidsroot/rawdata/sub-{subject}/ses-{session}`.
+
+    Args:
+        bidsroot: The root directory of the BIDS-ish dataset.
+        sourcefile: The raw MedPC file to convert.
+        subject: The subject identifier.
+        session: The session identifier.
+        task: The task identifier.
+        run: The run identifier.
+        timestamp_var: The name of the variable in the MedPC file that
+            contains the events timestamps.
+        event_var: The name of the variable in the MedPC file that
+            contains the event indices.
+        event_map: A dictionary mapping event indices to event names.
+        postfix: A string to append to the filename before the extension.
+    """
+    variables = parse_file(sourcefile)
+    events = get_events(variables[timestamp_var],
+                        variables[event_var],
+                        event_map)
+    events_fn = (bidsroot
+                 / f'rawdata/sub-{subject}/ses-{session}/'
+                 / f'sub-{subject}_ses-{session}_task-{task}_run-{run}_{postfix}.csv')
+    if events_fn.exists():
+        logging.info(f'Events file already exists for {sourcefile}')
+        return
+    events.to_csv(events_fn, index=False)
