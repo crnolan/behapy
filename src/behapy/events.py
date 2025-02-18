@@ -152,8 +152,8 @@ def regress(design_matrix: pd.DataFrame,
     dm = design_matrix.loc[:, design_matrix.sum() > min_events]
     if dm.empty:
         return pd.Series(dtype=float, index=dm.columns)
-    logging.info(f'Design matrix shape {dm.shape} fitting to '
-                 f'data shape {data.shape}')
+    logging.debug(f'Design matrix shape {dm.shape} fitting to '
+                  f'data shape {data.shape}')
     lr = sm.OLS(data.to_numpy(), dm.to_numpy()).fit()
     fitted = pd.Series(lr.params, index=dm.columns, name='beta')
     fitted.attrs['rsquared'] = lr.rsquared
@@ -200,15 +200,14 @@ def _build_single_ert(data: pd.DataFrame,
 def build_ert_matrix(data: pd.DataFrame,
                      events: pd.DataFrame,
                      window: Tuple[float, float]) -> pd.DataFrame:
-    ert_dfs = []
+    ert_dfs = {}
     for event in events.event_id.unique():
         ev = events.loc[events.event_id == event]
         matrix, offsets = _build_single_ert(
             data, ev, window=window)
-        column_index = pd.MultiIndex.from_product(
-            [[event], offsets/data.attrs['fs']], names=('event', 'offset'))
+        column_index = pd.Index(offsets/data.attrs['fs'], name='offset')
         _df = pd.DataFrame(matrix, dtype=float, index=ev.index,
                            columns=column_index)
-        ert_dfs.append(_df)
-    df = pd.concat(ert_dfs, axis=1)
+        ert_dfs[event] = _df
+    df = pd.concat(ert_dfs, axis=0, names=['event_id'])
     return df
