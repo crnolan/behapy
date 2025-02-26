@@ -36,7 +36,8 @@ def experiment_info(variables: "dict[str, str]") -> pd.Series:
 
 def get_events(timestamps: "list[str]",
                event_idxs: "list[str]",
-               event_map: "dict[int, str]" = None) -> pd.DataFrame:
+               event_map: "dict[int, str]" = None,
+               offset_map: "dict[int, str]" = None) -> pd.DataFrame:
     """Parse string-encoded timestamps and events.
 
     Args:
@@ -45,6 +46,9 @@ def get_events(timestamps: "list[str]",
         event_idxs: A list of strings of floats representing event indices
             as written by MedPC.
         event_map: A map from event indices (as integers) to event codes.
+        offset_map: A map from event indices (as integers) to event codes
+            that serve as offsets to the same-labelled event codes in
+            event_map.
 
     Returns:
         A `pd.DataFrame` of timestamps with the corresponding event code.
@@ -64,18 +68,38 @@ def get_events(timestamps: "list[str]",
     for ts, event in zip(timestamps, event_idxs):
         if float(ts) - ts_prev < 0:
             break
-        if event_map is not None:
-            event_list.append((pd.Timedelta(float(ts), unit='s'),
-                               0.,
-                               event_map[int(float(event))]))
-        else:
-            event_list.append((pd.Timedelta(float(ts), unit='s'),
-                               0.,
-                               int(float(event))))
+        event_list.append((pd.Timedelta(float(ts), unit='s'),
+                        0.,
+                        int(float(event))))
         ts_prev = float(ts)
-    return pd.DataFrame(event_list,
-                        columns=['onset', 'duration', 'event_id']
-                       ).set_index('onset')
+    df = pd.DataFrame(event_list,
+                    columns=['timestamp', 'duration', 'event_id'])
+    if event_map is None:
+        df = df.rename(columns={'timestamp': 'onset'}).set_index('onset')
+    elif offset_map is not None:
+        # For any events that have an offset in the offset_map, we want to
+        # use the timestamp of that offset event to calculate the duration of
+        # the relevant onset event.
+        onsets = df.query(f'event_id not in {list(offset_map.keys())}').copy()
+        offsets = df.query(f'event_id in {list(offset_map.keys())}').copy()
+        onsets['event_id'] = onsets['event_id'].map(event_map).fillna(onsets['event_id'])
+        offsets['event_id'] = offsets['event_id'].map(offset_map)
+        onsets['event_num'] = onsets.groupby('event_id').cumcount()
+        offsets['event_num'] = offsets.groupby('event_id').cumcount()
+        offsets = (offsets.rename(columns={'timestamp': 'offset'})
+                          .set_index(['event_id', 'event_num'])['offset'])
+        onsets['duration'] = (onsets.join(offsets,
+                                          on=['event_id', 'event_num'],
+                                          how='left')
+                                    .eval('offset - timestamp')
+                                    .fillna(0))
+        df = (onsets[['timestamp', 'duration', 'event_id']]
+              .rename(columns={'timestamp': 'onset'})
+              .set_index('onset'))
+    else:
+        # Otherwise just rename any events that are in the event_map
+        df['event_id'] = df['event_id'].map(event_map).fillna(df['event_id'])
+    return df
 
 
 def parse_line(line: str, prev_token: str, prev_data: Any) -> Tuple[str, str]:
