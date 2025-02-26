@@ -58,19 +58,24 @@ def get_events(timestamps: "list[str]",
             break
     if not valid_events:
         logging.warning('No valid events in list')
-        return pd.DataFrame({'timestamp': [], 'event': []})
+        return pd.DataFrame({'onset': [],
+                             'duration': [],
+                             'event_id': []}).set_index('onset')
     for ts, event in zip(timestamps, event_idxs):
         if float(ts) - ts_prev < 0:
             break
         if event_map is not None:
             event_list.append((pd.Timedelta(float(ts), unit='s'),
+                               0.,
                                event_map[int(float(event))]))
         else:
             event_list.append((pd.Timedelta(float(ts), unit='s'),
+                               0.,
                                int(float(event))))
         ts_prev = float(ts)
     return pd.DataFrame(event_list,
-                        columns=['timestamp', 'event'])
+                        columns=['onset', 'duration', 'event_id']
+                       ).set_index('onset')
 
 
 def parse_line(line: str, prev_token: str, prev_data: Any) -> Tuple[str, str]:
@@ -147,30 +152,30 @@ def generate_mapping(
             logging.warning(f'Bad template match for {fn.name}')
             continue
         groups = match.groupdict()
-        if groups['subject']:
-            subject = match.groups()['subject'].lower()
-        if groups['session']:
-            session = match.groups()['session'].lower()
-        if groups['task']:
-            task = match.groups()['task'].lower()
-        if groups['run']:
-            run = match.groups()['run'].lower()
+        if 'subject' in groups:
+            subject = groups['subject']
+        if 'session' in groups:
+            session = groups['session']
+        if 'task' in groups:
+            task = groups['task']
+        if 'run' in groups:
+            run = groups['run']
         # Then match any regular expressions in the MSN field of the file
-        variables = parse_file(fn)
         if msn_re:
+            variables = parse_file(fn)
             match = re.search(msn_re, variables['MSN'])
             if not match:
                 logging.warning(f'Bad MSN match for {fn.name}')
                 continue
             groups = match.groupdict()
-            if groups['subject']:
-                subject = match.groups()['subject'].lower()
-            if groups['session']:
-                session = match.groups()['session'].lower()
-            if groups['task']:
-                task = match.groups()['task'].lower()
-            if groups['run']:
-                run = match.groups()['run'].lower()
+            if 'subject' in groups:
+                subject = groups['subject']
+            if 'session' in groups:
+                session = groups['session']
+            if 'task' in groups:
+                task = groups['task']
+            if 'run' in groups:
+                run = groups['run']
         if subject is None or session is None or task is None or run is None:
             logging.warning(f'Incomplete subject/session information for '
                             f'{fn.name}, skipping file')
@@ -179,10 +184,10 @@ def generate_mapping(
     df = pd.DataFrame(sourcefiles,
                       columns=['sourcefile', 'subject', 'session', 'task',
                                'run'])
-    df['subject'] = df['subject'].map(subject_map)
-    df['session'] = df['session'].map(session_map)
-    df['task'] = df['task'].map(task_map)
-    df['run'] = df['run'].map(run_map)
+    df['subject'] = df['subject'].replace(subject_map)
+    df['session'] = df['session'].replace(session_map)
+    df['task'] = df['task'].replace(task_map)
+    df['run'] = df['run'].replace(run_map)
     return df
 
 
@@ -226,4 +231,5 @@ def events_to_bids(bidsroot: Union[Path, str],
     if events_fn.exists():
         logging.info(f'Events file already exists for {sourcefile}')
         return
+    events_fn.parent.mkdir(parents=True, exist_ok=True)
     events.to_csv(events_fn, index=False)
