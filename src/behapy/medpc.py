@@ -88,11 +88,8 @@ def get_events(timestamps: "list[str]",
         offsets['event_num'] = offsets.groupby('event_id').cumcount()
         offsets = (offsets.rename(columns={'timestamp': 'offset'})
                           .set_index(['event_id', 'event_num'])['offset'])
-        onsets['duration'] = (onsets.join(offsets,
-                                          on=['event_id', 'event_num'],
-                                          how='left')
-                                    .eval('offset - timestamp')
-                                    .fillna(0))
+        merge_df = onsets.join(offsets, on=['event_id', 'event_num'], how='left')
+        onsets['duration'] = (merge_df['offset'] - merge_df['timestamp']).fillna(0)
         df = (onsets[['timestamp', 'duration', 'event_id']]
               .rename(columns={'timestamp': 'onset'})
               .set_index('onset'))
