@@ -37,7 +37,8 @@ def _find_events(events: pd.DataFrame,
                  source: Union[str, Iterable[str]],
                  reject: Iterable[str] = [],
                  direction: Literal['backward', 'forward'] = 'forward',
-                 allow_exact_matches: bool = True) -> pd.DataFrame:
+                 allow_exact_matches: bool = True,
+                 tolerance: pd.Timedelta = None) -> pd.DataFrame:
     reference = [reference] if isinstance(reference, str) else reference
     source = [source] if isinstance(source, str) else source
     reject = reject + source
@@ -53,20 +54,24 @@ def _find_events(events: pd.DataFrame,
     tdf.rename(columns={'event_id': 'source_event_id'}, inplace=True)
     tdf.index = tdf.index.set_names('source_onset')
     if len(tdf) == 0 or len(rdf) == 0:
-        return pd.DataFrame(columns=['onset', 'duration', 'latency']).set_index('onset')
+        return pd.DataFrame(columns=['onset', 'duration']).set_index('onset')
     df = pd.merge_asof(tdf, rdf,
                        left_index=True, right_index=True,
                        direction=direction,
-                       allow_exact_matches=allow_exact_matches).dropna().reset_index()
-    if direction == 'forward':
-        df['latency'] = df['onset'] - df['source_onset']
-    else:
-        df['latency'] = df['source_onset'] - df['onset']
-    # I'm sure this can be done in a quicker and neater way
-    df2 = df.set_index('onset').groupby('onset', group_keys=False).apply(
-        lambda x: x.loc[x.latency == x.latency.min()])
-    # Add the group keys back
-    return df2.loc[df2.source_event_id.isin(source), ['duration', 'latency']]
+                       allow_exact_matches=allow_exact_matches,
+                       tolerance=tolerance).dropna().set_index('onset')
+    # df.index.name = 'onset'
+    # print(df)
+    return df['duration']
+    # if direction == 'forward':
+    #     df['latency'] = df['onset'] - df['source_onset']
+    # else:
+    #     df['latency'] = df['source_onset'] - df['onset']
+    # # I'm sure this can be done in a quicker and neater way
+    # df2 = df.set_index('onset').groupby('onset', group_keys=False).apply(
+    #     lambda x: x.loc[x.latency == x.latency.min()])
+    # # Add the group keys back
+    # return df2.loc[df2.source_event_id.isin(source), ['duration', 'latency']]
 
 
 def find_events(events: pd.DataFrame,
@@ -74,29 +79,68 @@ def find_events(events: pd.DataFrame,
                 source: Union[str, Iterable[str]],
                 reject: Iterable[str] = [],
                 direction: Literal['backward', 'forward'] = 'forward',
-                allow_exact_matches: bool = True) -> pd.DataFrame:
+                allow_exact_matches: bool = True,
+                tolerance: pd.Timedelta = None,
+                concatenate_as: str = None,
+                add_inverse_as: str = None) -> pd.DataFrame:
     """Find events relative to other events and return their latencies.
 
     Args:
-        events (pd.DataFrame): events DataFrame
-        reference (str): event of interest
-        source (str): event by which to filter the reference event
-        reject (Iterable[str]): events that can act as interrupting events
-            between source and reference events
+        events (pd.DataFrame): Events DataFrame.
+        reference (str): Event of interest.
+        source (str): Event by which to filter the reference event.
+        reject (Iterable[str]): Events that can act as interrupting events
+            between source and reference events.
         direction (Literal['backward', 'forward']):
-            direction of the reference event _from_ the source event
+            Direction of the reference event _from_ the source event.
         allow_exact_matches (bool):
-            whether to allow exact time matches
+            Whether to allow exact time matches.
+        tolerance (pd.Timedelta):
+            Maximum latency between source and reference.
+        concatenate_as (str):
+            Name for the new event to concatenate to the events
+            dataframe. If None, return only the new events without an
+            event id column.
+        add_inverse_as (str):
+            Name for a second new event that consists of all reference
+            events not returned by the search.
+
+    Returns:
+        pd.DataFrame: The events DataFrame with new events added (if
+            concatenate_as is set), otherwise a DataFrame with only the
+            new events (without an event_id column).
     """
     index_cols = [n for n in events.index.names
                     if n in (set(events.index.names) - {'onset'})]
     groups = events.groupby(index_cols)
-    return groups.apply(_find_events,
-                        reference=reference,
-                        source=source,
-                        reject=reject,
-                        direction=direction,
-                        allow_exact_matches=allow_exact_matches)
+    new_events = groups.apply(_find_events,
+                              reference=reference,
+                              source=source,
+                              reject=reject,
+                              direction=direction,
+                              allow_exact_matches=allow_exact_matches,
+                              tolerance=tolerance)
+    if not isinstance(new_events, pd.DataFrame):
+        new_events = new_events.to_frame()
+    if concatenate_as is None:
+        all_events = new_events
+    else:
+        new_events['event_id'] = concatenate_as
+        all_events = pd.concat([events, new_events]).sort_index()
+        if add_inverse_as is not None:
+            non_events = (
+                events
+                .loc[events['event_id'] == reference, ['duration']]
+                .merge(new_events.loc[:, []],
+                       how='left',
+                       left_index=True,
+                       right_index=True,
+                       indicator=True)
+                .query('_merge == "left_only"')
+                .loc[:, ['duration']])
+            non_events['event_id'] = add_inverse_as
+            all_events = pd.concat([all_events, non_events]).sort_index()
+    return all_events
 
 
 def _find_nearest(origin, fit):
