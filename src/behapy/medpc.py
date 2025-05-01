@@ -89,7 +89,9 @@ def get_events(timestamps: "list[str]",
         offsets = (offsets.rename(columns={'timestamp': 'offset'})
                           .set_index(['event_id', 'event_num'])['offset'])
         merge_df = onsets.join(offsets, on=['event_id', 'event_num'], how='left')
-        onsets['duration'] = (merge_df['offset'] - merge_df['timestamp']).fillna(0)
+        onsets['duration'] = ((merge_df['offset'] - merge_df['timestamp'])
+                              .fillna(0)
+                              .astype(float))
         df = (onsets[['timestamp', 'duration', 'event_id']]
               .rename(columns={'timestamp': 'onset'})
               .set_index('onset'))
