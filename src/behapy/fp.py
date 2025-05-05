@@ -400,12 +400,16 @@ def invalidate_samples(df, start, end):
     return df
 
 
-def smooth(data, cutoff=1):
+def smooth(data, numtaps=1001, cutoff=1):
     try:
+        if smooth.numtaps != numtaps or smooth.cutoff != cutoff:
+            raise AttributeError("Filter parameters changed")
         b = smooth.filter_b
     except AttributeError:
-        b = sig.firwin(1001, cutoff=[cutoff], fs=data.attrs['fs'], pass_zero=True)
+        b = sig.firwin(numtaps, cutoff=[cutoff], fs=data.attrs['fs'], pass_zero=True)
         smooth.filter_b = b
+        smooth.numtaps = numtaps
+        smooth.cutoff = cutoff
     # smoothed = series_like(data, 'smoothed')
     smoothed = data.copy()
     smoothed[:] = sig.filtfilt(b, 1, data.to_numpy(), axis=0).astype(np.float32)
@@ -414,11 +418,15 @@ def smooth(data, cutoff=1):
 
 def detrend(data, numtaps=1001, cutoff=0.05):
     try:
+        if smooth.numtaps != numtaps or smooth.cutoff != cutoff:
+            raise AttributeError("Filter parameters changed")
         b = detrend.filter_b
     except AttributeError:
         b = sig.firwin(numtaps, cutoff=[cutoff], fs=data.attrs['fs'],
                        pass_zero=False)
         detrend.filter_b = b
+        detrend.numtaps = numtaps
+        detrend.cutoff = cutoff
     # detrended = series_like(data, 'detrended')
     detrended = data.copy()
     detrended[:] = sig.filtfilt(b, 1, data.to_numpy(), axis=0).astype(np.float32)
