@@ -1,6 +1,7 @@
 from typing import List, Union
 import logging
 from pathlib import Path
+import re
 import numpy as np
 import pandas as pd
 import scipy.signal as sig
@@ -8,6 +9,8 @@ from tdt import read_block
 import json
 from collections import defaultdict
 from .pathutils import get_raw_fibre_path, get_events_path
+
+logger = logging.getLogger(__name__)
 
 
 def load_session_tank_map(filename: str,
@@ -49,11 +52,11 @@ def load_experiment_params(filename: str) -> Union[List[str], None]:
         params = json.load(file)
     if 'event_names' not in params:
         params['event_names'] = None
-        logging.warning('No event names found in experiment file, using '
+        logger.warning('No event names found in experiment file, using '
                         'default names')
     if 'invert_events' not in params:
         params['invert_events'] = False
-        logging.warning('Event polarity not defined, assuming 0 is off')
+        logger.warning('Event polarity not defined, assuming 0 is off')
     return params
 
 
@@ -89,7 +92,7 @@ def convert_stream(df, block, root, event_names=None, invert_events=False):
                 'run {}, channel {}, label {} from block {}, stream {}')
     info_msg = info_msg.format(df.subject, df.session, df.task, df.run,
                                df.channel, df.label, df.block, df.tdt_id)
-    logging.info(info_msg)
+    logger.info(info_msg)
     root = Path(root)
     if df.type == 'stream':
         data_fn = get_raw_fibre_path(root, df.subject, df.session, df.task,
@@ -119,42 +122,65 @@ def convert_block(df, root, event_names=None, invert_events=False):
         df.groupby('block').apply(convert_block, root, event_names,
                                   invert_events)
     else:
-        logging.info('Opening block {}'.format(blocks[0]))
+        logger.info('Opening block {}'.format(blocks[0]))
         try:
             block = read_block(blocks[0])
             df.apply(convert_stream, block=block, root=root,
                      event_names=event_names, invert_events=invert_events,
                      axis=1)
         except FileNotFoundError:
-            logging.warn('Cannot open block at path {}'.format(blocks[0]))
+            logger.warn('Cannot open block at path {}'.format(blocks[0]))
 
 
-def generate_session_map(root: str, files_from: str = None,
-                         stream_map: dict = None,
-                         epoc_map: dict = None) -> pd.DataFrame:
-    """Generates a session map table.
+def generate_mapping(root: str,
+                     files_from: str = None,
+                     filename_re: str = None,
+                     subject: str = None,
+                     session: str = None,
+                     task: str = None,
+                     run: str = None,
+                     subject_map: dict[str, str] = None,
+                     session_map: dict[str, str] = None,
+                     task_map: dict[str, str] = None,
+                     run_map: dict[str, str] = None,
+                     stream_map: dict[str, (str, str)] = None,
+                     epoc_map: dict[str, str] = None) -> pd.DataFrame:
+    """Generates a session mapping table.
 
     Given a root directory and optionally a relative path, generates a
     list of entries for data streams and events files from each TDT
     dataset.
 
     Args:
-        root (str): path to the location that any files will be
-                    referenced from
-        files_from (str): path (relative to root) in which to search for
-                          TDT files
+        root: Path to the location that any files will be
+          referenced from, e.g. the BIDS root directory.
+        files_from: Path (relative to root) in which to search for
+          TDT files. Must be a subdirectory of root.
+        filename_re: A regular expression to extract variables from the
+          filenames.
+        subject: Default subject ID.
+        session: Default session ID.
+        task: Default task ID.
+        run: Default run ID.
+        subject_map: Dictionary for remapping subject IDs.
+        session_map: Dictionary for remapping session IDs.
+        task_map: Dictionary for remapping task IDs.
+        run_map: Dictionary for remapping run IDs.
+        stream_map: Dictionary for mapping TDT stream IDs to a tuple
+            containing a channel name and a label.
+        epoc_map: Dictionary for mapping TDT epoc IDs to label.
 
     Returns:
         A pandas DataFrame with the following columns:
-            block (str): path to the TDT block file, relative to root
-            subject (str): subject ID
-            session (str): session ID
-            task (str): task ID
-            run (str): run ID
-            type (str): type of data (stream or epoc)
-            tdt_id (str): TDT ID of the data
-            channel (str): channel name
-            label (str): label of the data
+            block (str): Path to the TDT block file, relative to root.
+            subject (str): Subject ID.
+            session (str): Session ID.
+            task (str): Task ID.
+            run (str): Run ID.
+            type (str): Type of data (stream or epoc).
+            tdt_id (str): TDT ID of the data.
+            channel (str): Channel name.
+            label (str): Label of the data.
     """
     root = Path(root)
     if files_from is None:
@@ -162,31 +188,76 @@ def generate_session_map(root: str, files_from: str = None,
     else:
         files_from = root / files_from
     files_from = files_from.resolve()
+    if filename_re is None:
+        filename_re = r".*"
     session_map = defaultdict(list)
     for tev_path in files_from.glob('**/*.tev'):
+        # First get the TDT block and extract any metadata from it that
+        # we can
         block_path = tev_path.relative_to(root).parent
         block = read_block(tev_path.parent)
-        streams = block.streams.keys() & stream_map.keys()
-        logging.info(f'Ignoring streams {block.streams.keys() - streams}')
-        epocs = block.epocs.keys() & epoc_map.keys()
+        if subject is None:
+            subject = block.info.subject
+        if session is None:
+            session = block.info.start_date.strftime('%Y%m%d_%H%M%S')
+
+        # Now add / overwrite any information with what we can extract
+        # from the filename.
+        match = re.search(filename_re, str(tev_path))
+        if not match:
+            logger.warning(f'Bad template match for {tev_path.name}')
+            continue
+        groups = match.groupdict()
+        if 'subject' in groups:
+            subject = groups['subject']
+        if 'session' in groups:
+            session = groups['session']
+        if 'task' in groups:
+            task = groups['task']
+        if 'run' in groups:
+            run = groups['run']
+
+        if subject is None or session is None or task is None or run is None:
+            logger.warning(f'Incomplete subject/session information for '
+                            f'{tev_path.name}, skipping file')
+            continue
+
+        # Ignore any streams and epocs that don't have a mapping
+        streams = []
+        if stream_map:
+            streams = block.streams.keys() & stream_map.keys()
+        logger.info(f'Ignoring streams {block.streams.keys() - streams}')
+        epocs = []
+        if epoc_map:
+            epocs = block.epocs.keys() & epoc_map.keys()
+        logger.info(f'Ignoring epocs {block.epocs.keys() - epocs}')
+
         for stream in streams:
             session_map['block'].append(block_path)
-            session_map['subject'].append(block.info.subject)
-            session_map['session'].append(block.info.start_date.strftime('%Y%m%d_%H%M%S'))
-            session_map['task'].append('task')
-            session_map['run'].append('run')
+            session_map['subject'].append(subject)
+            session_map['session'].append(session)
+            session_map['task'].append(task)
+            session_map['run'].append(run)
             session_map['type'].append('stream')
             session_map['tdt_id'].append(stream)
             session_map['channel'].append(stream_map[stream][0])
             session_map['label'].append(stream_map[stream][1])
         for epoc in epocs:
             session_map['block'].append(block_path)
-            session_map['subject'].append(block.info.subject)
-            session_map['session'].append(block.info.start_date.strftime('%Y%m%d_%H%M%S'))
-            session_map['task'].append('task')
-            session_map['run'].append('run')
+            session_map['subject'].append(subject)
+            session_map['session'].append(session)
+            session_map['task'].append(task)
+            session_map['run'].append(run)
             session_map['type'].append('epoc')
             session_map['tdt_id'].append(epoc)
             session_map['channel'].append('events')
             session_map['label'].append(epoc_map[epoc])
-    return pd.DataFrame(session_map)
+
+    df = pd.DataFrame(session_map,
+                      columns=["block", "subject", "session", "task", "run",
+                               "type", "tdt_id", "channel", "label"])
+    df['subject'] = df['subject'].replace(subject_map)
+    df['session'] = df['session'].replace(session_map)
+    df['task'] = df['task'].replace(task_map)
+    df['run'] = df['run'].replace(run_map)
+    return df
