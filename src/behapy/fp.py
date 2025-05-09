@@ -497,6 +497,12 @@ def rlm(signal):
     return dff.to_frame(), fitted
 
 
+def ratiometric(positive, negative, mask):
+    fit = positive.copy()
+    fit[~mask] = positive[~mask] / negative[~mask]
+    return fit
+
+
 def normalise(signal, control, mask, fs, method='fit', detrend=True):
     # smoothed = smooth(control[~mask], fs=fs)
     smoothed = control[~mask]
