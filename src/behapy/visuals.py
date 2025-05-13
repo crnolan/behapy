@@ -61,7 +61,10 @@ def interval_overlay_map(trace, intervals, interval_callback=None):
 
 
 def rejection_shade(recording, intervals, interval_callback=None, y_dim='raw'):
-    isoch = recording.attrs['iso_channel']
+    try:
+        isoch = recording.attrs['artifact_channel']
+    except KeyError:
+        isoch = recording.attrs['iso_channel']
     iso_shade = datashade(signal_curve(recording[isoch], y_dim=y_dim),
                           aggregator=ds.count(), cmap='blue')
     iso_shade = iso_shade.opts(default_tools=[], tools=['xbox_select', 'xwheel_zoom'])

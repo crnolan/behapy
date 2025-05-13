@@ -17,10 +17,13 @@ from .pathutils import get_raw_fibre_path, list_raw, \
 from .config import load_preprocess_config
 
 
+logger = logging.getLogger(__name__)
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
 
 
-def series_like(df, name, default=0.):
+def series_like(df: pd.Series,
+                name: str,
+                default: float = 0.) -> pd.Series:
     series = pd.Series(default, index=df.index, name=name)
     series.attrs = df.attrs.copy()
     _ = series.attrs.pop('artifact_channel', None)
@@ -100,9 +103,12 @@ def load_signals(root, subject, session, task, run, label,
         acd = set(['iso', 'isos', 'isosbestic'])
         artifact_channel = set(channels).intersection(acd)
         if len(artifact_channel) == 0:
-            logging.warning(f'No artifact channel found for subject {subject}, '
-                            f'session {session}, task {task}, run {run} and '
-                            f'label {label}, using first channel {channels[0]}')
+            artifact_channel = next(
+                ([s] for s in channels if s.endswith(('.N', '.n'))), [])
+        if len(artifact_channel) == 0:
+            logger.warning(f'No artifact channel found for subject {subject}, '
+                           f'session {session}, task {task}, run {run} and '
+                           f'label {label}, using first channel {channels[0]}')
             artifact_channel = channels[0]
         elif len(artifact_channel) == 1:
             artifact_channel = artifact_channel.pop()
@@ -123,97 +129,6 @@ def load_signals(root, subject, session, task, run, label,
         raise ValueError(f'No channels found for subject {subject}, '
                          f'session {session}, task {task}, run {run} '
                          f'and label {label}')
-    return signal
-
-
-def load_signal(root, subject, session, task, run, label, iso_channel='iso',
-                channel=None):
-    """Load a raw signal, including the isosbestic channel if present.
-    """
-    root = Path(root).absolute()
-    if channel is None:
-        channel = '*'
-    recordings = pd.DataFrame(
-        list_raw(root, subject=subject, session=session, task=task,
-                 run=run, label=label, channel=channel))
-    subjects = recordings.loc[:, 'subject'].unique()
-    sessions = recordings.loc[:, 'session'].unique()
-    tasks = recordings.loc[:, 'task'].unique()
-    labels = recordings.loc[:, 'label'].unique()
-    if any([item.shape[0] != 1
-            for item in [subjects, sessions, tasks, labels]]):
-        msg = ('Multiple signal names found for session'
-               ' with subject {}, session {}, task {}, run {} and label {}')
-        msg = msg.format(subject, session, task, run, label)
-        logging.error(msg)
-        raise ValueError(msg)
-
-    if not (1 <= recordings.loc[:, 'channel'].unique().shape[0] <= 2):
-        msg = ('Only one channel (signal) or two channels (signal and iso) '
-               'are supported (subject {}, session {}, task {}, run {} and '
-               'label {})'
-               ).format(subject, session, task, run, label)
-        raise NotImplementedError(msg)
-
-    # Load channels
-    data = []
-    t0 = None
-    fs = None
-    for r in recordings.itertuples():
-        d, meta = load_channel(root=root,
-                               subject=r.subject,
-                               session=r.session,
-                               task=r.task,
-                               run=r.run,
-                               label=r.label,
-                               channel=r.channel)
-        if fs is None:
-            fs = meta['fs']
-        if t0 is None:
-            t0 = meta['start_time']
-        if (fs != meta['fs']) or (t0 != meta['start_time']):
-            msg = ('Unequal sample frequencies and/or start times '
-                   'for subject {}, session {}, task {}, run {} and label {}')
-            msg.format(subject, session, task, run, label)
-            raise ValueError(msg)
-        t = pd.TimedeltaIndex(np.arange(d.shape[0]) / fs + t0,
-                              unit='s',
-                              name='time')
-        t = pd.Index(np.arange(d.shape[0]) / fs + t0, name='time')
-        data.append(pd.Series(d, name=r.channel, index=t))
-
-    signal = pd.concat(data, axis=1)
-    signal.index.name = 'time'
-    signal.attrs['root'] = root
-    signal.attrs['fs'] = fs
-    signal.attrs['start_time'] = t0
-    signal.attrs['subject'] = subject
-    signal.attrs['session'] = session
-    signal.attrs['task'] = task
-    signal.attrs['run'] = run
-    signal.attrs['label'] = label
-    channels = signal.columns.to_list()
-    if len(channels) > 2:
-        msg = ('Too many channels for subject {}, session {}, '
-               'task {}, run {} and label {}')
-        raise ValueError(msg.format(subject, session, task, run, label))
-    elif len(channels) == 2:
-        if signal.columns.get_loc(iso_channel) is None:
-            msg = ('Iso channel {} not found for subject {}, '
-                   'session {}, task {}, run {} and label {}')
-            raise ValueError(msg.format(iso_channel, subject, session, task,
-                                        run, label))
-
-        signal.attrs['iso_channel'] = iso_channel
-        channels.remove(iso_channel)
-        signal.attrs['channel'] = channels.pop()
-    elif len(channels) == 1:
-        signal.attrs['iso_channel'] = None
-        signal.attrs['channel'] = channels.pop()
-    else:
-        msg = ('No channels found for subject {}, session {}, '
-               'task {}, run {} and label {}')
-        raise ValueError(msg.format(subject, session, task, run, label))
     return signal
 
 
@@ -265,7 +180,7 @@ def find_discontinuities(signal, mean_window=3, std_window=30, nstd_thresh=2):
     # characteristic STD.
     std_n = int(signal.attrs['fs'] * std_window)
     if 'channels' not in signal.attrs:
-        logging.info('Using original single-channel format')
+        logger.info('Using original single-channel format')
         channels = [signal.attrs['channel']]
         artifact_channel = signal.attrs['iso_channel']
     else:
@@ -320,7 +235,7 @@ def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
     bounds = find_discontinuities(signal, mean_window=mean_window,
                                   std_window=std_window, nstd_thresh=nstd_thresh)
     if 'channels' not in signal.attrs:
-        logging.info('Using original single-channel format')
+        logger.info('Using original single-channel format')
         channels = [signal.attrs['channel']]
     else:
         channels = signal.attrs['channels']
@@ -418,7 +333,7 @@ def smooth(data, numtaps=1001, cutoff=1):
 
 def detrend(data, numtaps=1001, cutoff=0.05):
     try:
-        if smooth.numtaps != numtaps or smooth.cutoff != cutoff:
+        if detrend.numtaps != numtaps or detrend.cutoff != cutoff:
             raise AttributeError("Filter parameters changed")
         b = detrend.filter_b
     except AttributeError:
@@ -439,7 +354,7 @@ def exp_fit(data):
     _max = data.max()
     popt, pcov = curve_fit(_exp_func, data.index, data, maxfev=10000,
                            bounds=[(-_max, 0, -_max, 0, 0), (_max, np.inf, _max, np.inf, _max)])
-    logging.info(f'popt: {popt}')
+    logger.info(f'popt: {popt}')
     fit = series_like(data, 'fit')
     fit[:] = _exp_func(data.index.to_numpy(), *popt)
     return fit
@@ -458,7 +373,7 @@ def full_fit(data):
     popt, pcov = curve_fit(_func, data.index, data, maxfev=10000,
                            bounds=[(-M, -M, -M, -M, 0, 0, 0, 0, -np.inf, -np.inf, ),
                                    (_max, np.inf, _max, np.inf, _max)])
-    logging.info(f'popt: {popt}')
+    logger.info(f'popt: {popt}')
     fit = series_like(data, 'fit')
     fit[:] = _func(data.index.to_numpy(), *popt)
     return fit
@@ -536,14 +451,14 @@ def preprocess(root, subject, session, task, run, label):
     intervals = load_rejections(root, subject, session, task, run, label)
     # Check if the recording has rejections saved
     if intervals is None:
-        logging.info(f'Recording for subject {subject}, '
-                     f'session {session}, task {task}, '
-                     f'run {run} and label {label} has no '
-                     f'rejections file, skipping.')
+        logger.info(f'Recording for subject {subject}, '
+                    f'session {session}, task {task}, '
+                    f'run {run} and label {label} has no '
+                    f'rejections file, skipping.')
         return False
-    logging.info(f'Preprocessing subject {subject}, '
-                 f'session {session}, task {task}, '
-                 f'run {run}, label {label}...')
+    logger.info(f'Preprocessing subject {subject}, '
+                f'session {session}, task {task}, '
+                f'run {run}, label {label}...')
     recording = load_signals(root, subject, session, task, run, label, 'iso')
     recording = downsample(recording, 64)
     rej = reject(recording, intervals, fill=True)
@@ -569,7 +484,7 @@ def preprocess(root, subject, session, task, run, label):
     try:
         dff.to_parquet(data_fn, engine='pyarrow')
     except TypeError as e:
-        logging.warning(f"Serialization error with pyarrow: {e}")
+        logger.warning(f"Serialization error with pyarrow: {e}")
         dff.to_parquet(data_fn, engine='fastparquet')
     meta = dff.attrs
     meta['root'] = str(root)
