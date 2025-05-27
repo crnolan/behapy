@@ -53,7 +53,7 @@ def load_experiment_params(filename: str) -> Union[List[str], None]:
     if 'event_names' not in params:
         params['event_names'] = None
         logger.warning('No event names found in experiment file, using '
-                        'default names')
+                       'default names')
     if 'invert_events' not in params:
         params['invert_events'] = False
         logger.warning('Event polarity not defined, assuming 0 is off')
@@ -89,12 +89,14 @@ def get_epoch_df(epoch, event_names=None, invert_events=False):
 
 def convert_stream(df, block, root, event_names=None, invert_events=False):
     info_msg = ('Creating raw data for subject {}, session {}, task {}, '
-                'run {}, channel {}, label {} from block {}, stream {}')
+                'run {}, channel {}, reference {}, label {} '
+                'from block {}, stream {}')
     info_msg = info_msg.format(df.subject, df.session, df.task, df.run,
-                               df.channel, df.label, df.block, df.tdt_id)
+                               df.channel, df.reference, df.label,
+                               df.block, df.tdt_id)
     logger.info(info_msg)
     root = Path(root)
-    if df.type == 'stream':
+    if df.type.isin(['stream', 'ratiometric', 'isosbestic']):
         data_fn = get_raw_fibre_path(root, df.subject, df.session, df.task,
                                      df.run, df.label, df.channel, 'npy')
         meta_fn = get_raw_fibre_path(root, df.subject, df.session, df.task,
@@ -103,6 +105,8 @@ def convert_stream(df, block, root, event_names=None, invert_events=False):
         meta = {
             'fs': block.streams[df.tdt_id].fs,
             'start_time': block.streams[df.tdt_id].start_time,
+            'type': 'signal' if df.type == 'stream' else df.type,
+            'reference': df.reference if 'reference' in df else None,
         }
         np.save(data_fn, block.streams[df.tdt_id].data, allow_pickle=False)
         with open(meta_fn, 'w') as file:
@@ -114,6 +118,10 @@ def convert_stream(df, block, root, event_names=None, invert_events=False):
                                  event_names=event_names,
                                  invert_events=invert_events)
         events_df.to_csv(fn, sep=',', na_rep='n/a')
+    else:
+        logger.warning('Unknown type {} for stream {}, skipping'.format(
+            df.type, df.tdt_id))
+        return
 
 
 def convert_block(df, root, event_names=None, invert_events=False):

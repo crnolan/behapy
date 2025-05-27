@@ -1,4 +1,4 @@
-from typing import Tuple, Iterable
+from typing import Tuple, Iterable, Union
 from pathlib import Path
 import json
 import logging
@@ -6,7 +6,6 @@ import numpy as np
 import scipy.signal as sig
 from scipy.optimize import curve_fit
 from collections import namedtuple
-from typing import Iterable
 import pandas as pd
 import statsmodels.api as sm
 from intervaltree import IntervalTree, Interval
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 Event = namedtuple('Event', ['name', 'fields', 'codes', 'onset', 'offset'])
 
 
-def series_like(df: pd.Series,
+def series_like(df: Union[pd.Series, pd.DataFrame],
                 name: str,
                 default: float = 0.) -> pd.Series:
     series = pd.Series(default, index=df.index, name=name)
@@ -30,6 +29,8 @@ def series_like(df: pd.Series,
     _ = series.attrs.pop('channels', None)
     _ = series.attrs.pop('iso_channel', None)
     _ = series.attrs.pop('channel', None)
+    _ = series.attrs.pop('types', None)
+    _ = series.attrs.pop('references', None)
     return series
 
 
@@ -68,6 +69,8 @@ def load_signals(root, subject, session, task, run, label,
     data = []
     t0 = None
     fs = None
+    channel_types = {}
+    references = {}
     for r in recordings.itertuples():
         d, meta = load_channel(root=root,
                                subject=r.subject,
@@ -85,6 +88,18 @@ def load_signals(root, subject, session, task, run, label,
                    'for subject {}, session {}, task {}, run {} and label {}')
             msg.format(subject, session, task, run, label)
             raise ValueError(msg)
+        if 'type' in meta:
+            channel_types[r.channel] = meta['type']
+        elif r.channel in ['iso', 'isos', 'isosbestic']:
+            channel_types[r.channel] = 'isosbestic'
+        else:
+            channel_types[r.channel] = 'unknown'
+        if ('reference' in meta
+                and meta['reference'] is not None
+                and meta['reference'] != ""):
+            references[r.channel] = meta['reference']
+        else:
+            references[r.channel] = None
         t = pd.Index(np.arange(d.shape[0]) / fs + t0, name='time')
         data.append(pd.Series(d, name=r.channel, index=t))
 
@@ -98,6 +113,8 @@ def load_signals(root, subject, session, task, run, label,
     signal.attrs['task'] = task
     signal.attrs['run'] = run
     signal.attrs['label'] = label
+    signal.attrs['types'] = channel_types
+    signal.attrs['references'] = references
     channels = signal.columns.to_list()
     if artifact_channel is None:
         acd = set(['iso', 'isos', 'isosbestic'])
@@ -121,7 +138,7 @@ def load_signals(root, subject, session, task, run, label,
     signal.attrs['artifact_channel'] = artifact_channel
     if exclude_artifact_channel:
         signal.attrs['channels'] = [c for c in channels
-                                      if c != artifact_channel]
+                                    if c != artifact_channel]
     else:
         signal.attrs['channels'] = channels
 
@@ -253,7 +270,8 @@ def find_disconnects(signal, zero_nstd_thresh=5, mean_window=3, std_window=30,
     return dc_intervals
 
 
-def intervals_to_mask(signal: pd.DataFrame, intervals: Interval) -> pd.Series:
+def intervals_to_mask(signal: pd.DataFrame,
+                      intervals: IntervalTree) -> pd.Series:
     """Convert a list of intervals to a boolean mask.
 
     Args:
@@ -273,29 +291,23 @@ def intervals_to_mask(signal: pd.DataFrame, intervals: Interval) -> pd.Series:
     return mask
 
 
-def reject(signal, intervals, fill=False):
-    """ Filter the site data to remove the specified intervals. """
+def reject(signal: pd.DataFrame,
+           intervals: IntervalTree) -> pd.DataFrame:
+    """Filter the site data to remove the specified intervals.
+
+    Rejected samples are replaced with NaN.
+
+    Args:
+        signal: The timeseries from which to remove or replace the
+            supplied intervals.
+        intervals: A list of intervals to reject.
+
+    Returns:
+        A copy of the signal with the specified intervals replaced with NaN.
+    """
     mask = intervals_to_mask(signal, intervals)
-    if fill:
-        # Return a copy of the signal with the rejected intervals
-        # replace with a linear interpolation between the endpoints.
-        signal = signal.copy()
-        signal.loc[~mask] = np.nan
-        signal = signal.interpolate(method='linear', limit_direction='both')
-        signal['mask'] = mask
-        return signal
-    else:
-        return signal[mask].copy()
-
-
-def save_rejected_intervals(signal: 'pd.DataFrame',
-                            intervals: 'Sequence[Tuple[int, int]]'):
-    path = get_rejected_intervals_path(signal.attrs['base'],
-                                       signal.attrs['subject'],
-                                       signal.attrs['session'],
-                                       signal.attrs['task'],
-                                       signal.attrs['run'],
-                                       signal.attrs['label'])
+    signal.loc[~mask] = np.nan
+    return signal
 
 
 def map_events(events: Iterable[Event]):
@@ -303,19 +315,9 @@ def map_events(events: Iterable[Event]):
     return {key: event for event in events.values() for key in event.fields}
 
 
-def invalidate_samples(df, start, end):
-    """Invalidate samples """
-    if start == None:
-        start = df.index[0]
-    if end == None:
-        end = df.index[-1]
-    if 'Valid' not in df:
-        df['Valid'] = True
-    df.loc[start:end, 'Valid'] = False
-    return df
-
-
-def smooth(data, numtaps=1001, cutoff=1):
+def smooth(data, params):
+    numtaps = params.get('smooth_numtaps', 1001)
+    cutoff = params.get('smooth_cutoff', 1.)
     try:
         if smooth.numtaps != numtaps or smooth.cutoff != cutoff:
             raise AttributeError("Filter parameters changed")
@@ -331,7 +333,9 @@ def smooth(data, numtaps=1001, cutoff=1):
     return smoothed
 
 
-def detrend(data, numtaps=1001, cutoff=0.05):
+def detrend(data, params):
+    numtaps = params.get('detrend_numtaps', 1001)
+    cutoff = params.get('detrend_cutoff', 0.05)
     try:
         if detrend.numtaps != numtaps or detrend.cutoff != cutoff:
             raise AttributeError("Filter parameters changed")
@@ -395,30 +399,30 @@ def fit_debleached(data, control):
     return data_lp - ols_model.fit().fittedvalues,
 
 
-def rlm(signal):
+def rlm(df, signal, control, params):
     """ Fit the site data to the isobestic channel using a robust regression.
     """
-    if len(signal.attrs['channels']) > 1:
-        raise ValueError('Only one channel is supported.')
-    ch = signal.attrs['channels'][0]
-    iso = signal.attrs['artifact_channel']
-    df = signal.loc[signal['mask'], :]
-    fitted = series_like(signal, 'fitted')
-    fitted[signal['mask']] = sm.RLM(df[ch], df[iso]).fit().fittedvalues
-    fitted.attrs['channels'] = ['fitted']
-    dff = series_like(signal, ch)
-    dff[signal['mask']] = (df[ch] - fitted[signal['mask']]) / fitted[signal['mask']]
-    dff.attrs['channels'] = [ch]
-    return dff.to_frame(), fitted
+    df_filt = df.dropna()
+    fitted = series_like(df, 'fitted')
+    fitted[df_filt.index] = (
+        sm.RLM(df_filt[signal], df_filt[control])
+        .fit()
+        .fittedvalues)
+    dff = series_like(df, signal)
+    dff[df_filt.index] = ((df.loc[df_filt.index, signal]
+                           - fitted[df_filt.index])
+                          / fitted[df_filt.index])
+    return dff.to_frame()
 
 
-def ratiometric(positive, negative, mask):
+def ratiometric(df, signal, reference, params):
     fit = positive.copy()
     fit[~mask] = positive[~mask] / negative[~mask]
     return fit
 
 
-def normalise(signal, control, mask, fs, method='fit', detrend=True):
+def normalise(signal, mask, fs, method='fit', detrend=True):
+
     # smoothed = smooth(control[~mask], fs=fs)
     smoothed = control[~mask]
     fit = np.polyfit(smoothed, signal[~mask], deg=1)
@@ -446,6 +450,87 @@ def normalise(signal, control, mask, fs, method='fit', detrend=True):
         raise ValueError("Unrecognised normalisation method {}".format(method))
 
 
+def is_reference_type(channel_type):
+    """ Check if a channel type is a known reference channel."""
+    return channel_type in ['isosbestic', 'ratiometric']
+
+
+def get_normalisation_method(channel_type, methods):
+    method = None
+    if isinstance(methods, str):
+        method = methods
+    if isinstance(methods, dict):
+        method = methods.get(channel_type, 'detrend')
+    if channel_type == "raw":
+        if method is None:
+            method = "detrend"
+        if method != "detrend":
+            logger.warning(
+                f'Method {methods} invalid for raw channel type, '
+                f'using \'detrend\'.')
+            method = "detrend"
+        return method
+    elif channel_type == "isosbestic":
+        if method is None:
+            method = "detrend"
+        if method not in ["detrend", "rlm"]:
+            logger.warning(
+                f'Method {methods} invalid for isosbestic channel type, '
+                f'using \'detrend\'.')
+            method = "detrend"
+        return method
+    elif channel_type == "ratiometric":
+        if method is None:
+            method = "ratio"
+        if method not in ["detrend", "ratio"]:
+            logger.warning(
+                f'Method {methods} invalid for ratiometric channel type, '
+                f'using \'ratio\'.')
+            method = "ratio"
+        return method
+    else:
+        raise ValueError(f'Unknown channel type {channel_type}')
+
+
+def norm(channels: pd.DataFrame,
+         methods: Union[str, dict[str, str]] = 'detrend',
+         params: dict = {}) -> pd.DataFrame:
+
+    channel_types = channels.attrs['types']
+    references = channels.attrs['references']
+    signals = [ch for ch in channels.columns if channel_types[ch] == 'signal']
+    z_channels = pd.DataFrame(index=channels.index, columns=signals)
+    z_channels.attrs = channels.attrs.copy()
+    z_channels.attrs.pop('types', None)
+    z_channels.attrs.pop('references', None)
+
+    for ch in signals:
+        if references[ch] is None:
+            # Signal has no reference, use method for raw
+            method = get_normalisation_method("raw", methods)
+        else:
+            if is_reference_type(channel_types[references[ch]]):
+                ref_ch = references[ch]
+                method = get_normalisation_method(
+                    channel_types[ref_ch], methods)
+            else:
+                raise ValueError(f'Unknown reference channel type '
+                                 f'{channel_types[references[ch]]} for '
+                                 f'channel {ch}')
+        if method == 'detrend':
+            dff = (detrend(channels[ch], params)
+                   / smooth(channels[ch], params))
+            z_channels[ch] = dff - dff.mean() / dff.std()
+        elif method == 'rlm':
+            dff = rlm(channels, ch, ref_ch, params)
+            z_channels[ch] = dff - dff.mean() / dff.std()
+        elif method == 'ratio':
+            dff = ratiometric(channels, ch, ref_ch, params)
+            z_channels[ch] = dff - dff.mean() / dff.std()
+
+    return z_channels
+
+
 def preprocess(root, subject, session, task, run, label):
     config = load_preprocess_config(root)
     intervals = load_rejections(root, subject, session, task, run, label)
@@ -459,9 +544,10 @@ def preprocess(root, subject, session, task, run, label):
     logger.info(f'Preprocessing subject {subject}, '
                 f'session {session}, task {task}, '
                 f'run {run}, label {label}...')
-    recording = load_signals(root, subject, session, task, run, label, 'iso')
+    recording = load_signals(root, subject, session, task, run, label)
     recording = downsample(recording, 64)
-    rej = reject(recording, intervals, fill=True)
+    rej = reject(recording, intervals)
+    #
     ch = recording.attrs['channels']
     # We were doing a robust regression, but the fit isn't good enough.
     # Let's just detrend and divide by the smoothed signal instead.
