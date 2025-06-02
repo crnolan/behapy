@@ -19,6 +19,7 @@ dependencies:
   - pyarrow
   - bottleneck
   - ipykernel
+  - mathjax
   - pip:
     - tdt
     - rpy2

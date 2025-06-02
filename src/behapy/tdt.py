@@ -13,8 +13,9 @@ from .pathutils import get_raw_fibre_path, get_events_path
 logger = logging.getLogger(__name__)
 
 
-def load_session_tank_map(filename: str,
-                          sourcedata_root: str = None) -> pd.DataFrame:
+def load_session_tank_map(
+    filename: str, sourcedata_root: Union[str, Path, None] = None
+) -> pd.DataFrame:
     """Loads a file mapping sessions to the tank files.
 
     Args:
@@ -24,17 +25,19 @@ def load_session_tank_map(filename: str,
                                the sessions file is used
     """
     dtypes = {
-        'block': str,
-        'subject': str,
-        'session': str,
-        'task': str,
-        'run': str,
-        'type': str,
-        'tdt_id': str,
-        'channel': str,
-        'label': str
+        "block": str,
+        "subject": str,
+        "session": str,
+        "task": str,
+        "run": str,
+        "type": str,
+        "tdt_id": str,
+        "channel": str,
+        "reference": str,
+        "label": str,
     }
     info = pd.read_csv(filename, dtype=dtypes)
+    # info.replace({np.nan: None}, inplace=True)
     filename_parent = Path(filename).resolve().parent
     if sourcedata_root is None:
         sourcedata_root = filename_parent
@@ -50,20 +53,21 @@ def load_session_tank_map(filename: str,
 def load_experiment_params(filename: str) -> Union[List[str], None]:
     with open(filename) as file:
         params = json.load(file)
-    if 'event_names' not in params:
-        params['event_names'] = None
-        logger.warning('No event names found in experiment file, using '
-                       'default names')
-    if 'invert_events' not in params:
-        params['invert_events'] = False
-        logger.warning('Event polarity not defined, assuming 0 is off')
+    if "event_names" not in params:
+        params["event_names"] = None
+        logger.warning(
+            "No event names found in experiment file, using " "default names"
+        )
+    if "invert_events" not in params:
+        params["invert_events"] = False
+        logger.warning("Event polarity not defined, assuming 0 is off")
     return params
 
 
 def get_epoch_df(epoch, event_names=None, invert_events=False):
     if event_names is None:
         event_names = [str(i) for i in range(8)]
-    bits = [list('{:08b}'.format(x.astype(int))) for x in epoch.data]
+    bits = [list("{:08b}".format(x.astype(int))) for x in epoch.data]
     if invert_events:
         bits = ~np.array(bits).astype(bool)
         bits = bits.astype(int)
@@ -74,85 +78,108 @@ def get_epoch_df(epoch, event_names=None, invert_events=False):
     oo = np.concatenate([bits[:1, :], np.diff(bits, axis=0)])
     event_onsets = [onsets[x == 1] for x in oo.T]
     event_offsets = [onsets[x == -1] for x in oo.T]
-    event_id = [[event_names[i]] * len(x)
-                for i, x in zip(np.flip(np.arange(8)), event_onsets)]
+    event_id = [
+        [event_names[i]] * len(x) for i, x in zip(np.flip(np.arange(8)), event_onsets)
+    ]
     # Now make a DataFrame, adding the event ID as a column
-    df = pd.DataFrame({
-        'onset': np.concatenate(event_onsets),
-        'offset': np.concatenate(event_offsets),
-        'event_id': np.concatenate(event_id)
-    })
-    df['duration'] = df.offset - df.onset
-    df = df.loc[:, ['onset', 'duration', 'event_id']].sort_values(by='onset')
-    return df.set_index('onset')
+    df = pd.DataFrame(
+        {
+            "onset": np.concatenate(event_onsets),
+            "offset": np.concatenate(event_offsets),
+            "event_id": np.concatenate(event_id),
+        }
+    )
+    df["duration"] = df.offset - df.onset
+    df = df.loc[:, ["onset", "duration", "event_id"]].sort_values(by="onset")
+    return df.set_index("onset")
 
 
 def convert_stream(df, block, root, event_names=None, invert_events=False):
-    info_msg = ('Creating raw data for subject {}, session {}, task {}, '
-                'run {}, channel {}, reference {}, label {} '
-                'from block {}, stream {}')
-    info_msg = info_msg.format(df.subject, df.session, df.task, df.run,
-                               df.channel, df.reference, df.label,
-                               df.block, df.tdt_id)
+    info_msg = (
+        "Creating raw data for subject {}, session {}, task {}, "
+        "run {}, channel {}, reference {}, label {} "
+        "from block {}, stream {}"
+    )
+    info_msg = info_msg.format(
+        df.subject,
+        df.session,
+        df.task,
+        df.run,
+        df.channel,
+        df.reference,
+        df.label,
+        df.block,
+        df.tdt_id,
+    )
     logger.info(info_msg)
     root = Path(root)
-    if df.type.isin(['stream', 'ratiometric', 'isosbestic']):
-        data_fn = get_raw_fibre_path(root, df.subject, df.session, df.task,
-                                     df.run, df.label, df.channel, 'npy')
-        meta_fn = get_raw_fibre_path(root, df.subject, df.session, df.task,
-                                     df.run, df.label, df.channel, 'json')
+    if df.type in ["stream", "signal", "ratiometric", "isosbestic", "control"]:
+        data_fn = get_raw_fibre_path(
+            root, df.subject, df.session, df.task, df.run, df.label, df.channel, "npy"
+        )
+        meta_fn = get_raw_fibre_path(
+            root, df.subject, df.session, df.task, df.run, df.label, df.channel, "json"
+        )
         data_fn.parent.mkdir(parents=True, exist_ok=True)
         meta = {
-            'fs': block.streams[df.tdt_id].fs,
-            'start_time': block.streams[df.tdt_id].start_time,
-            'type': 'signal' if df.type == 'stream' else df.type,
-            'reference': df.reference if 'reference' in df else None,
+            "fs": block.streams[df.tdt_id].fs,
+            "start_time": block.streams[df.tdt_id].start_time,
+            "type": "signal" if df.type == "stream" else df.type,
         }
+        if not df.isna().reference:
+            meta["reference"] = df.reference
         np.save(data_fn, block.streams[df.tdt_id].data, allow_pickle=False)
-        with open(meta_fn, 'w') as file:
+        with open(meta_fn, "w") as file:
             json.dump(meta, file, indent=4)
-    elif df.type == 'epoc':
+    elif df.type == "epoc":
         fn = get_events_path(root, df.subject, df.session, df.task, df.run)
         fn.parent.mkdir(parents=True, exist_ok=True)
-        events_df = get_epoch_df(block.epocs[df.tdt_id],
-                                 event_names=event_names,
-                                 invert_events=invert_events)
-        events_df.to_csv(fn, sep=',', na_rep='n/a')
+        events_df = get_epoch_df(
+            block.epocs[df.tdt_id], event_names=event_names, invert_events=invert_events
+        )
+        events_df.to_csv(fn, sep=",", na_rep="n/a")
     else:
-        logger.warning('Unknown type {} for stream {}, skipping'.format(
-            df.type, df.tdt_id))
+        logger.warning(
+            "Unknown type {} for stream {}, skipping".format(df.type, df.tdt_id)
+        )
         return
 
 
 def convert_block(df, root, event_names=None, invert_events=False):
     blocks = df.block.unique()
     if len(blocks) > 1:
-        df.groupby('block').apply(convert_block, root, event_names,
-                                  invert_events)
+        df.groupby("block").apply(convert_block, root, event_names, invert_events)
     else:
-        logger.info('Opening block {}'.format(blocks[0]))
+        logger.info("Opening block {}".format(blocks[0]))
         try:
             block = read_block(blocks[0])
-            df.apply(convert_stream, block=block, root=root,
-                     event_names=event_names, invert_events=invert_events,
-                     axis=1)
+            df.apply(
+                convert_stream,
+                block=block,
+                root=root,
+                event_names=event_names,
+                invert_events=invert_events,
+                axis=1,
+            )
         except FileNotFoundError:
-            logger.warn('Cannot open block at path {}'.format(blocks[0]))
+            logger.warn("Cannot open block at path {}".format(blocks[0]))
 
 
-def generate_mapping(root: str,
-                     files_from: str = None,
-                     filename_re: str = None,
-                     subject: str = None,
-                     session: str = None,
-                     task: str = None,
-                     run: str = None,
-                     subject_map: dict[str, str] = None,
-                     session_map: dict[str, str] = None,
-                     task_map: dict[str, str] = None,
-                     run_map: dict[str, str] = None,
-                     stream_map: dict[str, (str, str)] = None,
-                     epoc_map: dict[str, str] = None) -> pd.DataFrame:
+def generate_mapping(
+    root: str,
+    files_from: str = None,
+    filename_re: str = None,
+    subject: str = None,
+    session: str = None,
+    task: str = None,
+    run: str = None,
+    subject_map: dict[str, str] = None,
+    session_map: dict[str, str] = None,
+    task_map: dict[str, str] = None,
+    run_map: dict[str, str] = None,
+    stream_map: dict[str, (str, str)] = None,
+    epoc_map: dict[str, str] = None,
+) -> pd.DataFrame:
     """Generates a session mapping table.
 
     Given a root directory and optionally a relative path, generates a
@@ -199,7 +226,7 @@ def generate_mapping(root: str,
     if filename_re is None:
         filename_re = r".*"
     session_map = defaultdict(list)
-    for tev_path in files_from.glob('**/*.tev'):
+    for tev_path in files_from.glob("**/*.tev"):
         # First get the TDT block and extract any metadata from it that
         # we can
         block_path = tev_path.relative_to(root).parent
@@ -207,65 +234,81 @@ def generate_mapping(root: str,
         if subject is None:
             subject = block.info.subject
         if session is None:
-            session = block.info.start_date.strftime('%Y%m%d_%H%M%S')
+            session = block.info.start_date.strftime("%Y%m%d_%H%M%S")
 
         # Now add / overwrite any information with what we can extract
         # from the filename.
         match = re.search(filename_re, str(tev_path))
         if not match:
-            logger.warning(f'Bad template match for {tev_path.name}')
+            logger.warning(f"Bad template match for {tev_path}")
             continue
         groups = match.groupdict()
-        if 'subject' in groups:
-            subject = groups['subject']
-        if 'session' in groups:
-            session = groups['session']
-        if 'task' in groups:
-            task = groups['task']
-        if 'run' in groups:
-            run = groups['run']
+        if "subject" in groups:
+            subject = groups["subject"]
+        if "session" in groups:
+            session = groups["session"]
+        if "task" in groups:
+            task = groups["task"]
+        if "run" in groups:
+            run = groups["run"]
 
         if subject is None or session is None or task is None or run is None:
-            logger.warning(f'Incomplete subject/session information for '
-                            f'{tev_path.name}, skipping file')
+            logger.warning(
+                f"Incomplete subject/session information for "
+                f"{tev_path.name}, skipping file"
+            )
             continue
 
         # Ignore any streams and epocs that don't have a mapping
         streams = []
         if stream_map:
             streams = block.streams.keys() & stream_map.keys()
-        logger.info(f'Ignoring streams {block.streams.keys() - streams}')
+        logger.info(f"Ignoring streams {block.streams.keys() - streams}")
         epocs = []
         if epoc_map:
             epocs = block.epocs.keys() & epoc_map.keys()
-        logger.info(f'Ignoring epocs {block.epocs.keys() - epocs}')
+        logger.info(f"Ignoring epocs {block.epocs.keys() - epocs}")
 
         for stream in streams:
-            session_map['block'].append(block_path)
-            session_map['subject'].append(subject)
-            session_map['session'].append(session)
-            session_map['task'].append(task)
-            session_map['run'].append(run)
-            session_map['type'].append('stream')
-            session_map['tdt_id'].append(stream)
-            session_map['channel'].append(stream_map[stream][0])
-            session_map['label'].append(stream_map[stream][1])
+            session_map["block"].append(block_path)
+            session_map["subject"].append(subject)
+            session_map["session"].append(session)
+            session_map["task"].append(task)
+            session_map["run"].append(run)
+            session_map["type"].append(stream_map[stream][0])
+            session_map["tdt_id"].append(stream)
+            session_map["channel"].append(stream_map[stream][1])
+            session_map["reference"].append(stream_map[stream][2])
+            session_map["label"].append(stream_map[stream][3])
         for epoc in epocs:
-            session_map['block'].append(block_path)
-            session_map['subject'].append(subject)
-            session_map['session'].append(session)
-            session_map['task'].append(task)
-            session_map['run'].append(run)
-            session_map['type'].append('epoc')
-            session_map['tdt_id'].append(epoc)
-            session_map['channel'].append('events')
-            session_map['label'].append(epoc_map[epoc])
+            session_map["block"].append(block_path)
+            session_map["subject"].append(subject)
+            session_map["session"].append(session)
+            session_map["task"].append(task)
+            session_map["run"].append(run)
+            session_map["type"].append("epoc")
+            session_map["tdt_id"].append(epoc)
+            session_map["channel"].append("events")
+            session_map["reference"].append("")
+            session_map["label"].append(epoc_map[epoc])
 
-    df = pd.DataFrame(session_map,
-                      columns=["block", "subject", "session", "task", "run",
-                               "type", "tdt_id", "channel", "label"])
-    df['subject'] = df['subject'].replace(subject_map)
-    df['session'] = df['session'].replace(session_map)
-    df['task'] = df['task'].replace(task_map)
-    df['run'] = df['run'].replace(run_map)
-    return df
+    df = pd.DataFrame(
+        session_map,
+        columns=[
+            "block",
+            "subject",
+            "session",
+            "task",
+            "run",
+            "type",
+            "tdt_id",
+            "channel",
+            "reference",
+            "label",
+        ],
+    )
+    df["subject"] = df["subject"].replace(subject_map)
+    df["session"] = df["session"].replace(session_map)
+    df["task"] = df["task"].replace(task_map)
+    df["run"] = df["run"].replace(run_map)
+    return df.sort_values(by=["block", "tdt_id"])
