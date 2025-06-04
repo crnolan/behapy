@@ -14,8 +14,10 @@ import panel as pn
 import param
 
 hv.extension("bokeh")
-pn.extension("tabulator", "mathjax", comms="vscode")
+pn.extension("tabulator", "mathjax", loading_spinner="dots", comms="vscode")
 # pn.extension('tabulator')
+
+logger = logging.getLogger(__name__)
 
 
 def signal_curve(df, y_dim):
@@ -42,13 +44,13 @@ def interval_overlay(intervals, selected=[]):
 def record_intervals(bounds, x, y, intervals, interval_callback=None):
     if None not in [x, y]:
         intervals.remove_overlap(x)
-        logging.debug(f"Intervals now {intervals}")
+        logger.debug(f"Intervals now {intervals}")
         if interval_callback is not None:
             interval_callback()
     if bounds is not None and None not in [bounds[0], bounds[2]]:
         intervals.add(Interval(bounds[0], bounds[2]))
         intervals.merge_overlaps()
-        logging.debug(f"Intervals now {intervals}")
+        logger.debug(f"Intervals now {intervals}")
         if interval_callback is not None:
             interval_callback()
     return interval_overlay(intervals)
@@ -164,65 +166,6 @@ class PreprocessDashboard(param.Parameterized):
         self.dff = dff
         self.zdff_update += 1
 
-    def build_curve_opts(self, label, color):
-        return [
-            opts.Curve(
-                "signal." + label,
-                line_dash="solid",
-                color=color,
-            ),
-            opts.Curve(
-                "isosbestic." + label,
-                line_dash="dashed",
-                color=color,
-            ),
-            opts.Curve(
-                "ratio." + label,
-                line_dash="dashed",
-                color=color,
-            ),
-            opts.Curve(
-                "control." + label,
-                line_dash="dashed",
-                color=color,
-            ),
-            opts.Curve(
-                "dff." + label,
-                line_dash="solid",
-                color=color,
-            ),
-            opts.Curve(
-                "rawfit." + label,
-                line_dash="dotted",
-                color=color,
-            ),
-            opts.Curve(
-                "flp." + label,
-                line_dash="dotted",
-                color=color,
-            ),
-            opts.Curve(
-                "fhp." + label,
-                line_dash="dashed",
-                color=color,
-            ),
-            opts.Curve(
-                "control_fit." + label,
-                line_dash="dashed",
-                color=color,
-            ),
-            opts.Curve(
-                "dff_fit." + label,
-                line_dash="solid",
-                color=color,
-            ),
-            opts.Curve(
-                "zdff." + label,
-                ylabel=r"$$\Delta F/F$$ (z-scored)",
-                color=color,
-            )
-        ]
-
     @param.depends("zdff_update")
     def plot_all(self):
         if self.recording is None or self.dff is None:
@@ -234,18 +177,26 @@ class PreprocessDashboard(param.Parameterized):
         relative_curves = []
         z_curves = []
         channel_opts = []
-        dff_name = r"$$\Delta F/F$$"
         color_iter = iter(hv.Cycle("Colorblind").values)
         references = self.recording.attrs["references"]
         channel_types = self.recording.attrs["types"]
         for ch in signals:
+            logger.debug(f"Plotting channel {ch}")
+            sig_color = next(color_iter)
+            ref_color = sig_color
             raw_curves.append(
                 hv.Curve(
                     (self.recording.index.to_numpy(), self.recording[ch]),
                     kdims=["Time"],
-                    vdims=["Raw"],
+                    vdims=["F"],
                     group="signal",
                     label=ch,
+                )
+            )
+            channel_opts.append(
+                opts.Curve(
+                    "signal." + ch,
+                    color=sig_color,
                 )
             )
             if "fit" in self.dff[ch]:
@@ -253,9 +204,15 @@ class PreprocessDashboard(param.Parameterized):
                     hv.Curve(
                         (self.dff.index.to_numpy(), self.dff[ch, "fit"]),
                         kdims=["Time"],
-                        vdims=["Raw fit"],
+                        vdims=["F"],
                         group="rawfit",
-                        label=ch,
+                        label=f"{ch} exp fit",
+                    )
+                )
+                channel_opts.append(
+                    opts.Curve(
+                        f"rawfit.{ch} exp fit",
+                        color=sig_color,
                     )
                 )
             if "flp" in self.dff[ch]:
@@ -263,9 +220,15 @@ class PreprocessDashboard(param.Parameterized):
                     hv.Curve(
                         (self.dff.index.to_numpy(), self.dff[ch, "flp"]),
                         kdims=["Time"],
-                        vdims=["Low pass filtered"],
+                        vdims=["F"],
                         group="flp",
-                        label=ch,
+                        label=f"{ch} LP",
+                    )
+                )
+                channel_opts.append(
+                    opts.Curve(
+                        f"flp.{ch} LP",
+                        color=sig_color,
                     )
                 )
             if "dff" in self.dff[ch]:
@@ -278,18 +241,31 @@ class PreprocessDashboard(param.Parameterized):
                         label=ch,
                     )
                 )
+                channel_opts.append(
+                    opts.Curve(
+                        "dff." + ch,
+                        color=sig_color,
+                    )
+                )
             if "fhp" in self.dff[ch]:
                 dff_curves.append(
                     hv.Curve(
                         (self.dff.index.to_numpy(), self.dff[ch, "fhp"]),
                         kdims=["Time"],
-                        vdims=["High pass filtered"],
+                        vdims=["df"],
                         group="fhp",
-                        label=ch,
+                        label=f"{ch} HP",
+                    )
+                )
+                channel_opts.append(
+                    opts.Curve(
+                        f"fhp.{ch} HP",
+                        color=sig_color,
                     )
                 )
             if references[ch] is not None:
                 if fp.is_reference_type(channel_types[references[ch]]):
+                    ref_color = next(color_iter)
                     raw_curves.append(
                         hv.Curve(
                             (
@@ -297,65 +273,94 @@ class PreprocessDashboard(param.Parameterized):
                                 self.recording[references[ch]],
                             ),
                             kdims=["Time"],
-                            vdims=["Raw"],
+                            vdims=["F"],
                             group=channel_types[references[ch]],
                             label=references[ch],
+                        )
+                    )
+                    channel_opts.append(
+                        opts.Curve(
+                            channel_types[references[ch]] + "." + references[ch],
+                            color=ref_color,
                         )
                     )
                     if references[ch] in self.dff.columns.get_level_values(0):
                         if "fit" in self.dff[references[ch]]:
                             raw_curves.append(
                                 hv.Curve(
-                                    (self.dff.index.to_numpy(), self.dff[references[ch], "fit"]),
+                                    (
+                                        self.dff.index.to_numpy(),
+                                        self.dff[references[ch], "fit"],
+                                    ),
                                     kdims=["Time"],
-                                    vdims=["Raw fit"],
+                                    vdims=["F"],
                                     group="rawfit",
-                                    label=references[ch],
+                                    label=f"{references[ch]} exp fit",
+                                )
+                            )
+                            channel_opts.append(
+                                opts.Curve(
+                                    f"rawfit.{references[ch]} exp fit",
+                                    color=ref_color,
                                 )
                             )
                         if "dff" in self.dff[references[ch]]:
                             dff_curves.append(
                                 hv.Curve(
-                                    (self.dff.index.to_numpy(), self.dff[references[ch], "dff"]),
+                                    (
+                                        self.dff.index.to_numpy(),
+                                        self.dff[references[ch], "dff"],
+                                    ),
                                     kdims=["Time"],
                                     vdims=["dff"],
                                     group="dff",
                                     label=references[ch],
                                 )
                             )
+                            channel_opts.append(
+                                opts.Curve(
+                                    "dff." + references[ch],
+                                    color=ref_color,
+                                )
+                            )
                 else:
-                    logging.error(
+                    logger.error(
                         f"Unknown reference channel type "
                         f"{channel_types[references[ch]]} for "
                         f"channel {ch}"
                     )
             if "control_fit" in self.dff[ch]:
-                relative_curves.append(
-                    hv.Curve(
-                        (self.dff.index.to_numpy(), self.dff[ch, "dff"]),
-                        kdims=["Time"],
-                        vdims=["dff"],
-                        group="dff",
-                        label=ch,
-                    )
-                )
-                relative_curves.append(
+                dff_curves.append(
                     hv.Curve(
                         (self.dff.index.to_numpy(), self.dff[ch, "control_fit"]),
                         kdims=["Time"],
                         vdims=["dff"],
                         group="control_fit",
-                        label=ch,
+                        label=f"{references[ch]} fit to {ch}",
                     )
                 )
+                channel_opts.append(
+                    opts.Curve(
+                        f"control_fit.{references[ch]} fit to {ch}",
+                        color=ref_color,
+                    )
+                )
+
             if "dff_fit" in self.dff[ch]:
+                dff_fit_label = r"$$(\Delta F/F)_{" + ch + r"}-(\\Delta F/F)_{" + references[ch] + r"}$$"
                 relative_curves.append(
                     hv.Curve(
                         (self.dff.index.to_numpy(), self.dff[ch, "dff_fit"]),
                         kdims=["Time"],
-                        vdims=["dff"],
+                        vdims=["dff_fit"],
                         group="dff_fit",
-                        label=ch,
+                        label=dff_fit_label,
+                    )
+                )
+                channel_opts.append(
+                    opts.Curve(
+                        "dff_fit." + dff_fit_label,
+                        color=sig_color,
                     )
                 )
             z_curves.append(
@@ -367,10 +372,12 @@ class PreprocessDashboard(param.Parameterized):
                     label=ch,
                 )
             )
-            channel_opts.extend(self.build_curve_opts(ch, next(color_iter)))
-            if references[ch] is not None:
-                channel_opts.extend(self.build_curve_opts(references[ch], next(color_iter)))
-
+            channel_opts.append(
+                opts.Curve(
+                    "zdff." + ch,
+                    color=sig_color,
+                )
+            )
         iom = interval_overlay_map(raw_curves[0], self.intervals, self.update_intervals)
         plots = [(hv.Overlay(raw_curves) * iom).opts(xaxis=None)]
         if len(dff_curves) > 0:
@@ -382,10 +389,59 @@ class PreprocessDashboard(param.Parameterized):
             channel_opts
             + [
                 opts.Curve(
+                    alpha=0.8,
                     responsive=True,
                     min_width=600,
                     min_height=300,
                     tools=tools,
+                ),
+                opts.Curve(
+                    "signal",
+                    line_dash="solid",
+                ),
+                opts.Curve(
+                    "isosbestic",
+                    line_dash="solid",
+                ),
+                opts.Curve(
+                    "ratio",
+                    line_dash="solid",
+                ),
+                opts.Curve(
+                    "control",
+                    line_dash="solid",
+                ),
+                opts.Curve(
+                    "dff",
+                    line_dash="solid",
+                    ylabel=r"$$\Delta F/F$$",
+                ),
+                opts.Curve(
+                    "rawfit",
+                    line_dash="dotted",
+                ),
+                opts.Curve(
+                    "flp",
+                    line_dash="dotted",
+                ),
+                opts.Curve(
+                    "fhp",
+                    line_dash="dotted",
+                    ylabel=r"$$\Delta F$$",
+                ),
+                opts.Curve(
+                    "control_fit",
+                    line_dash="dotted",
+                    ylabel=r"$$\Delta F/F$$",
+                ),
+                opts.Curve(
+                    "dff_fit",
+                    line_dash="solid",
+                    ylabel=r"$$\Delta F/F$$ (difference)",
+                ),
+                opts.Curve(
+                    "zdff",
+                    ylabel=r"$$\Delta F/F$$ (z-scored)",
                 ),
             ]
         )

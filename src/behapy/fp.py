@@ -233,10 +233,23 @@ def find_disconnects(
         std_n = int(signal.attrs["fs"] * std_window)
         data_rstds = bn.move_std(data, std_n, axis=0)
         zero_thresh = np.nanmedian(data_rstds, axis=0) * zero_nstd_thresh
+        # handle start and end
+        if bounds[0][0] == 0:
+            if np.any(np.min(data[bounds[0][0] : bounds[0][1]], axis=0) < zero_thresh):
+                dc_intervals.add(Interval(ts[bounds[0][0]], ts[bounds[0][1]]))
+        if bounds[-1][1] == data.shape[0] - 1:
+            if np.any(
+                np.min(data[bounds[-1][0] : bounds[-1][1]], axis=0) < zero_thresh
+            ):
+                dc_intervals.add(Interval(ts[bounds[-1][0]], ts[bounds[-1][1]]))
+        # now handle the rest
         bounds = [(0, 0)] + bounds + [(data.shape[0] - 1, data.shape[0] - 1)]
         for (on0, off0), (on1, off1) in zip(bounds[:-1], bounds[1:]):
+            if off0 >= on1:
+                continue
             if np.any(np.mean(data[off0:on1], axis=0) < zero_thresh):
                 dc_intervals.add(Interval(ts[on0], ts[off1]))
+
     dc_intervals.merge_overlaps()
     return dc_intervals
 
@@ -296,6 +309,9 @@ def smooth(signal, params):
             raise AttributeError("Filter parameters changed")
         b = smooth.filter_b
     except AttributeError:
+        logger.debug(
+            f"Creating new smoothing FIR filter with numtaps={numtaps}, cutoff={cutoff}"
+        )
         b = sig.firwin(numtaps, cutoff=[cutoff], fs=signal.attrs["fs"], pass_zero=True)
         smooth.filter_b = b
         smooth.numtaps = numtaps
@@ -325,6 +341,9 @@ def detrend(signal: pd.Series, params: dict = {}) -> pd.DataFrame:
             raise AttributeError("Filter parameters changed")
         b = detrend.filter_b
     except AttributeError:
+        logger.debug(
+            f"Creating new detrend FIR filter with numtaps={numtaps}, cutoff={cutoff}"
+        )
         b = sig.firwin(numtaps, cutoff=[cutoff], fs=signal.attrs["fs"], pass_zero=False)
         detrend.filter_b = b
         detrend.numtaps = numtaps
@@ -356,19 +375,61 @@ def dblexp(x, a1, a2, b1, b2, c):
     return a1 * np.exp(-b1 * x) + a2 * np.exp(-b2 * x) + c
 
 
+def sglexp_min(x, a1, b1, c):
+    result = x[1, :] - (a1 * np.exp(-b1 * x[0, :]) + c)
+    result = np.where(result > 0, result, result * 10)
+    return result
+
+
+def dblexp_min(x, a1, a2, b1, b2, c):
+    result = x[1, :] - (a1 * np.exp(-b1 * x[0, :]) + a2 * np.exp(-b2 * x[0, :]) + c)
+    result = np.where(result > 0, result, result * 10)
+    return result
+
+
 def exp_min_fit(signal, params):
     _params = params.get("exp_min_fit", {})
     minpoints = signal.cummin().drop_duplicates()
     M = signal.max()
-    if _params.get("method", "single") == "double":
+    fit_func = _params.get("function", "single")
+    logger.info(
+        f"Using fit function {fit_func} for channel {signal.name} with minimum points {minpoints.shape[0]}"
+    )
+    if fit_func == "double":
         popt, _ = curve_fit(
             dblexp,
             minpoints.index.to_numpy().T,
             minpoints.to_numpy().T,
-            maxfev=10000,
+            maxfev=100000,
             bounds=([0, 0, 0, 0, -M * 10], [M, M, 1, 1, M * 10]),
             nan_policy="omit",
             loss="soft_l1",
+        )
+        fit = dblexp(signal.index.to_numpy(), *popt)
+    elif fit_func == "single_min":
+        popt, _ = curve_fit(
+            sglexp_min,
+            minpoints.reset_index().to_numpy().T,
+            np.zeros(minpoints.shape[0]),
+            maxfev=100000,
+            # p0=(1, 1e-8, M),
+            bounds=([0, 0, -M * 10], [M, 1, M * 10]),
+            nan_policy="omit",
+            loss="linear",
+            x_scale=[1, 1e-6, 1],
+        )
+        fit = sglexp(signal.index.to_numpy(), *popt)
+    elif fit_func == "double_min":
+        popt, _ = curve_fit(
+            dblexp_min,
+            minpoints.reset_index().to_numpy().T,
+            np.zeros(minpoints.shape[0]),
+            maxfev=100000,
+            p0=(1, 1, 1e-8, 1e-8, M),
+            bounds=([0, 0, 0, 0, -M * 10], [M, M, 1, 1, M * 10]),
+            nan_policy="omit",
+            loss="linear",
+            x_scale=[1, 1, 1e-6, 1e-6, 1],
         )
         fit = dblexp(signal.index.to_numpy(), *popt)
     else:
@@ -376,14 +437,77 @@ def exp_min_fit(signal, params):
             sglexp,
             minpoints.index.to_numpy().T,
             minpoints.to_numpy().T,
-            maxfev=10000,
+            maxfev=100000,
             bounds=([0, 0, -M * 10], [M, 1, M * 10]),
             nan_policy="omit",
             loss="soft_l1",
         )
         fit = sglexp(signal.index.to_numpy(), *popt)
-    logger.debug(f"popt for channel {signal.name}: {popt}")
+    logger.info(f"popt for channel {signal.name}: {popt}")
     return fit
+
+
+def scaled_dbl_fit(
+    x,
+    sig_a1,
+    sig_a2,
+    ctrl_a1,
+    ctrl_a2,
+    sig_b1,
+    sig_b2,
+    ctrl_b1,
+    ctrl_b4,
+    sig_c,
+    ctrl_c,
+    fit_c,
+    gamma,
+):
+    sigfit = dblexp(x[0, :], sig_a1, sig_a2, sig_b1, sig_b2, sig_c)
+    ctrlfit = dblexp(x[0, :], ctrl_a1, ctrl_a2, ctrl_b1, ctrl_b4, ctrl_c)
+    return sigfit + sigfit * (gamma * (x[1, :] - ctrlfit) / ctrlfit + fit_c)
+
+
+def simultaneous_fit(df, signal_name, control_name, params):
+    column_index = pd.MultiIndex.from_product(
+        [[], []], names=["channel", "sigtype"]
+    )
+    results = pd.DataFrame(index=df.index, columns=column_index)
+    M = df.max()
+    m = df.min()
+    popt, _ = curve_fit(
+        scaled_dbl_fit,
+        df[control_name].reset_index().to_numpy().T,
+        df[signal_name].to_numpy().T,
+        maxfev=1000000,
+        p0=(1, 1, 1, 1, 1e-8, 1e-8, 1e-8, 1e-8, m[signal_name], m[control_name], 0, 1),
+        bounds=(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -M.max(), 0],
+            [
+                M[signal_name],
+                M[signal_name],
+                M[control_name],
+                M[control_name],
+                1,
+                1,
+                1,
+                1,
+                m[signal_name],
+                m[control_name],
+                M.max(),
+                M[control_name],
+            ],
+        ),
+        nan_policy="omit",
+        loss="linear",
+        x_scale=[1, 1, 1, 1, 1e-6, 1e-6, 1e-6, 1e-6, 10, 10, 10, 0.1],
+    )
+    logger.info(f"popt for simultaneous fit of {signal_name} to {control_name}: {popt}")
+    results[(signal_name, "fit")] = dblexp(df.index, popt[0], popt[1], popt[4], popt[5], popt[8])
+    results[(control_name, "fit")] = dblexp(df.index, popt[2], popt[3], popt[6], popt[7], popt[9])
+    results[(signal_name, "dff")] = df[signal_name] - results[(signal_name, "fit")]
+    results[(control_name, "dff")] = df[control_name] - results[(control_name, "fit")]
+    results[(signal_name, "dff_fit")] = scaled_dbl_fit(df[control_name].reset_index().to_numpy().T, *popt)
+    return results
 
 
 def debleach(signal: pd.Series, params: dict = {}) -> pd.DataFrame:
@@ -478,7 +602,7 @@ def get_normalisation_method(channel_type, methods):
     elif channel_type in ["isosbestic", "control"]:
         if method is None:
             method = "detrend"
-        if method not in ["detrend", "fit", "rlm"]:
+        if method not in ["detrend", "fit", "rlm", "simultaneous"]:
             logger.warning(
                 f"Method {methods} invalid for {channel_type} channel type, "
                 f"using 'detrend'."
@@ -505,6 +629,8 @@ def normalise(
     params: dict = {},
 ) -> pd.DataFrame:
 
+    if methods is None:
+        methods = params.get("normalisation", {})
     channel_types = channels.attrs["types"]
     references = channels.attrs["references"]
     signals = [ch for ch in channels.columns if channel_types[ch] == "signal"]
@@ -530,8 +656,7 @@ def normalise(
                     f"{channel_types[references[ch]]} for "
                     f"channel {ch}"
                 )
-        logger.info(
-            f"Normalising channel {ch} using method {method}")
+        logger.info(f"Normalising channel {ch} using method {method}")
         if method == "detrend":
             dff = detrend(channels[ch], params)
             results[dff.columns] = dff
@@ -550,6 +675,12 @@ def normalise(
             results[ch, "z"] = (
                 rlm_fit[ch, "dff_fit"] - rlm_fit[ch, "dff_fit"].mean()
             ) / rlm_fit[ch, "dff_fit"].std()
+        elif method == "simultaneous":
+            fit = simultaneous_fit(channels, ch, ref_ch, params)
+            results[fit.columns] = fit
+            results[ch, "z"] = (
+                fit[ch, "dff_fit"] - fit[ch, "dff_fit"].mean()
+            ) / fit[ch, "dff_fit"].std()
         elif method == "ratio":
             dff = ratiometric(channels, ch, ref_ch, params)
             results[ch, "dff"] = dff
