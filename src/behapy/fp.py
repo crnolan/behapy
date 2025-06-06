@@ -391,7 +391,7 @@ def exp_min_fit(signal, params):
     _params = params.get("exp_min_fit", {})
     minpoints = signal.cummin().drop_duplicates()
     M = signal.max()
-    fit_func = _params.get("function", "single")
+    fit_func = _params.get("function", "double_min")
     logger.info(
         f"Using fit function {fit_func} for channel {signal.name} with minimum points {minpoints.shape[0]}"
     )
@@ -468,9 +468,7 @@ def scaled_dbl_fit(
 
 
 def simultaneous_fit(df, signal_name, control_name, params):
-    column_index = pd.MultiIndex.from_product(
-        [[], []], names=["channel", "sigtype"]
-    )
+    column_index = pd.MultiIndex.from_product([[], []], names=["channel", "sigtype"])
     results = pd.DataFrame(index=df.index, columns=column_index)
     M = df.max()
     m = df.min()
@@ -479,7 +477,7 @@ def simultaneous_fit(df, signal_name, control_name, params):
         df[control_name].reset_index().to_numpy().T,
         df[signal_name].to_numpy().T,
         maxfev=1000000,
-        p0=(1, 1, 1, 1, 1e-8, 1e-8, 1e-8, 1e-8, m[signal_name], m[control_name], 0, 1),
+        p0=(1, 1, 1, 1, 1e-4, 1e-4, 1e-5, 1e-5, m[signal_name], m[control_name], 0, 1),
         bounds=(
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -M.max(), 0],
             [
@@ -499,14 +497,30 @@ def simultaneous_fit(df, signal_name, control_name, params):
         ),
         nan_policy="omit",
         loss="linear",
-        x_scale=[1, 1, 1, 1, 1e-6, 1e-6, 1e-6, 1e-6, 10, 10, 10, 0.1],
+        x_scale=[1, 1, 1, 1, 5e-4, 5e-4, 5e-4, 5e-4, 100, 100, 1, 0.1],
     )
     logger.info(f"popt for simultaneous fit of {signal_name} to {control_name}: {popt}")
-    results[(signal_name, "fit")] = dblexp(df.index, popt[0], popt[1], popt[4], popt[5], popt[8])
-    results[(control_name, "fit")] = dblexp(df.index, popt[2], popt[3], popt[6], popt[7], popt[9])
-    results[(signal_name, "dff")] = df[signal_name] - results[(signal_name, "fit")]
-    results[(control_name, "dff")] = df[control_name] - results[(control_name, "fit")]
-    results[(signal_name, "dff_fit")] = scaled_dbl_fit(df[control_name].reset_index().to_numpy().T, *popt)
+    results[(signal_name, "raw_fit")] = dblexp(
+        df.index, popt[0], popt[1], popt[4], popt[5], popt[8]
+    )
+    results[(control_name, "raw_fit")] = dblexp(
+        df.index, popt[2], popt[3], popt[6], popt[7], popt[9]
+    )
+    results[(signal_name, "dff")] = (
+        df[signal_name] - results[(signal_name, "raw_fit")]
+    ) / results[(signal_name, "raw_fit")]
+    results[(control_name, "dff")] = (
+        df[control_name] - results[(control_name, "raw_fit")]
+    ) / results[(control_name, "raw_fit")]
+    results[(control_name, "dff_fit")] = (
+        results[(control_name, "dff")] * popt[11] + popt[10]
+    )
+    results[(signal_name, "simultaneous_fit")] = scaled_dbl_fit(
+        df[control_name].reset_index().to_numpy().T, *popt
+    )
+    results[(signal_name, "dff_diff")] = (
+        df[signal_name] - results[(signal_name, "simultaneous_fit")]
+    )
     return results
 
 
@@ -518,12 +532,12 @@ def debleach(signal: pd.Series, params: dict = {}) -> pd.DataFrame:
     difference of the signal and the fit by the fit.
     """
     column_index = pd.MultiIndex.from_product(
-        [[signal.name], ["fit", "dff"]], names=["channel", "sigtype"]
+        [[], []], names=["channel", "sigtype"]
     )
     results = pd.DataFrame(index=signal.index, columns=column_index)
     fit = exp_min_fit(signal, params)
     dff = (signal - fit) / fit
-    results[signal.name, "fit"] = fit
+    results[signal.name, "raw_fit"] = fit
     results[signal.name, "dff"] = dff
     return results
 
@@ -531,25 +545,21 @@ def debleach(signal: pd.Series, params: dict = {}) -> pd.DataFrame:
 def rlm(df, signal_name, control_name, params):
     """Fit the site data to the isobestic channel using a robust regression."""
     column_index = pd.MultiIndex.from_product(
-        [[signal_name, control_name], ["fit", "dff"]], names=["channel", "sigtype"]
+        [[], []], names=["channel", "sigtype"]
     )
     results = pd.DataFrame(index=df.index, columns=column_index)
     fit_signal = debleach(df[signal_name], params)
     fit_control = debleach(df[control_name], params)
     results[fit_signal.columns] = fit_signal
     results[fit_control.columns] = fit_control
-    # for name in fit_signal:
-    #     results[name] = fit_signal[name]
-    # for ch in fit_control:
-    #     results[control_name, ch] = fit_control[ch]
     filtered = results.dropna()
-    results[signal_name, "control_fit"] = (
+    results[control_name, "dff_fit"] = (
         sm.RLM(filtered[signal_name, "dff"], filtered[control_name, "dff"])
         .fit()
         .fittedvalues
     )
-    results[signal_name, "dff_fit"] = (
-        results[signal_name, "dff"] - results[signal_name, "control_fit"]
+    results[signal_name, "dff_diff"] = (
+        results[signal_name, "dff"] - results[control_name, "dff_fit"]
     )
     return results
 
@@ -673,14 +683,14 @@ def normalise(
             rlm_fit = rlm(channels, ch, ref_ch, params)
             results[rlm_fit.columns] = rlm_fit
             results[ch, "z"] = (
-                rlm_fit[ch, "dff_fit"] - rlm_fit[ch, "dff_fit"].mean()
-            ) / rlm_fit[ch, "dff_fit"].std()
+                results[ch, "dff_diff"] - results[ch, "dff_diff"].mean()
+            ) / results[ch, "dff_diff"].std()
         elif method == "simultaneous":
             fit = simultaneous_fit(channels, ch, ref_ch, params)
             results[fit.columns] = fit
-            results[ch, "z"] = (
-                fit[ch, "dff_fit"] - fit[ch, "dff_fit"].mean()
-            ) / fit[ch, "dff_fit"].std()
+            results[ch, "z"] = (fit[ch, "dff_diff"] - fit[ch, "dff_diff"].mean()) / fit[
+                ch, "dff_diff"
+            ].std()
         elif method == "ratio":
             dff = ratiometric(channels, ch, ref_ch, params)
             results[ch, "dff"] = dff

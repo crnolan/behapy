@@ -68,7 +68,11 @@ def channel_curve(
     x = channel.index.to_numpy()
     color = channel_color(channel_name, color)
     if line_dash is None:
-        line_dash = "dotted" if channel_type in ["fit", "raw_fit", "flp", "fhp", "dff_fit"] else "solid"
+        line_dash = (
+            "dotted"
+            if channel_type in ["fit", "raw_fit", "flp", "fhp", "dff_fit"]
+            else "solid"
+        )
     kdims = ["Time (s)"]
     group = channel_type if group is None else group
     if channel_type in ["raw", "signal", "isosbestic", "control", "ratiometric"]:
@@ -103,9 +107,10 @@ def channel_curve(
         ydim = "dff_diff" if ydim is None else ydim
         ylabel = r"$$\Delta({\Delta F}/F)$$" if ylabel is None else ylabel
         label = f"{channel_name} (residual)" if label is None else label
-    elif channel_type in ["zdff"]:
-        ydim = "zdff" if ydim is None else ydim
+    elif channel_type in ["z"]:
+        ydim = "z" if ydim is None else ydim
         ylabel = r"z" if ylabel is None else ylabel
+        label = f"{channel_name} (z-score)" if label is None else label
     else:
         raise ValueError(
             f"Unknown channel type {channel_type} for channel {channel_name}."
@@ -274,290 +279,61 @@ class PreprocessDashboard(param.Parameterized):
         tools = ["xbox_select"]
         signals = fp.get_signal_channels(self.recording)
         raw_curves = []
+        df_curves = []
         dff_curves = []
         relative_curves = []
         z_curves = []
         channel_opts = []
-        color_iter = iter(hv.Cycle("Colorblind").values)
         references = self.recording.attrs["references"]
         channel_types = self.recording.attrs["types"]
-        for ch in signals:
-            logger.debug(f"Plotting channel {ch}")
-            sig_color = next(color_iter)
-            ref_color = sig_color
-            raw_curves.append(
-                hv.Curve(
-                    (self.recording.index.to_numpy(), self.recording[ch]),
-                    kdims=["Time"],
-                    vdims=["F"],
-                    group="signal",
-                    label=ch,
-                )
-            )
-            channel_opts.append(
-                opts.Curve(
-                    "signal." + ch,
-                    color=sig_color,
-                )
-            )
-            if "fit" in self.dff[ch]:
-                raw_curves.append(
-                    hv.Curve(
-                        (self.dff.index.to_numpy(), self.dff[ch, "fit"]),
-                        kdims=["Time"],
-                        vdims=["F"],
-                        group="rawfit",
-                        label=f"{ch} exp fit",
-                    )
-                )
-                channel_opts.append(
-                    opts.Curve(
-                        f"rawfit.{ch} exp fit",
-                        color=sig_color,
-                    )
-                )
-            if "flp" in self.dff[ch]:
-                raw_curves.append(
-                    hv.Curve(
-                        (self.dff.index.to_numpy(), self.dff[ch, "flp"]),
-                        kdims=["Time"],
-                        vdims=["F"],
-                        group="flp",
-                        label=f"{ch} LP",
-                    )
-                )
-                channel_opts.append(
-                    opts.Curve(
-                        f"flp.{ch} LP",
-                        color=sig_color,
-                    )
-                )
-            if "dff" in self.dff[ch]:
-                dff_curves.append(
-                    hv.Curve(
-                        (self.dff.index.to_numpy(), self.dff[ch, "dff"]),
-                        kdims=["Time"],
-                        vdims=["dff"],
-                        group="dff",
-                        label=ch,
-                    )
-                )
-                channel_opts.append(
-                    opts.Curve(
-                        "dff." + ch,
-                        color=sig_color,
-                    )
-                )
-            if "fhp" in self.dff[ch]:
-                dff_curves.append(
-                    hv.Curve(
-                        (self.dff.index.to_numpy(), self.dff[ch, "fhp"]),
-                        kdims=["Time"],
-                        vdims=["df"],
-                        group="fhp",
-                        label=f"{ch} HP",
-                    )
-                )
-                channel_opts.append(
-                    opts.Curve(
-                        f"fhp.{ch} HP",
-                        color=sig_color,
-                    )
-                )
-            if references[ch] is not None:
-                if fp.is_reference_type(channel_types[references[ch]]):
-                    ref_color = next(color_iter)
-                    raw_curves.append(
-                        hv.Curve(
-                            (
-                                self.recording[references[ch]].index.to_numpy(),
-                                self.recording[references[ch]],
-                            ),
-                            kdims=["Time"],
-                            vdims=["F"],
-                            group=channel_types[references[ch]],
-                            label=references[ch],
-                        )
-                    )
-                    channel_opts.append(
-                        opts.Curve(
-                            channel_types[references[ch]] + "." + references[ch],
-                            color=ref_color,
-                        )
-                    )
-                    if references[ch] in self.dff.columns.get_level_values(0):
-                        if "fit" in self.dff[references[ch]]:
-                            raw_curves.append(
-                                hv.Curve(
-                                    (
-                                        self.dff.index.to_numpy(),
-                                        self.dff[references[ch], "fit"],
-                                    ),
-                                    kdims=["Time"],
-                                    vdims=["F"],
-                                    group="rawfit",
-                                    label=f"{references[ch]} exp fit",
-                                )
-                            )
-                            channel_opts.append(
-                                opts.Curve(
-                                    f"rawfit.{references[ch]} exp fit",
-                                    color=ref_color,
-                                )
-                            )
-                        if "dff" in self.dff[references[ch]]:
-                            dff_curves.append(
-                                hv.Curve(
-                                    (
-                                        self.dff.index.to_numpy(),
-                                        self.dff[references[ch], "dff"],
-                                    ),
-                                    kdims=["Time"],
-                                    vdims=["dff"],
-                                    group="dff",
-                                    label=references[ch],
-                                )
-                            )
-                            channel_opts.append(
-                                opts.Curve(
-                                    "dff." + references[ch],
-                                    color=ref_color,
-                                )
-                            )
-                else:
-                    logger.error(
-                        f"Unknown reference channel type "
-                        f"{channel_types[references[ch]]} for "
-                        f"channel {ch}"
-                    )
-            if "control_fit" in self.dff[ch]:
-                dff_curves.append(
-                    hv.Curve(
-                        (self.dff.index.to_numpy(), self.dff[ch, "control_fit"]),
-                        kdims=["Time"],
-                        vdims=["dff"],
-                        group="control_fit",
-                        label=f"{references[ch]} fit to {ch}",
-                    )
-                )
-                channel_opts.append(
-                    opts.Curve(
-                        f"control_fit.{references[ch]} fit to {ch}",
-                        color=ref_color,
-                    )
-                )
+        recs = self.recording.copy()
+        recs.columns = pd.MultiIndex.from_tuples(
+            [(ch, channel_types[ch]) for ch in recs.columns],
+            names=["channel_name", "channel_type"],
+        )
+        for ch in recs:
+            raw_curves.append(channel_curve(recs[ch]))
+        for ch in self.dff:
+            curve = channel_curve(self.dff[ch])
+            if ch[1] in [
+                "raw",
+                "signal",
+                "isosbestic",
+                "control",
+                "ratiometric",
+                "raw_fit",
+                "flp",
+            ]:
+                raw_curves.append(curve)
+            elif ch[1] in ["fhp"]:
+                df_curves.append(curve)
+            elif ch[1] in ["dff", "dff_fit"]:
+                dff_curves.append(curve)
+            # elif ch[1] in ["simultaneous_fit"]:
+            #     relative_curves.append(curve)
+            elif ch[1] in ["dff_diff"]:
+                relative_curves.append(curve)
+            elif ch[1] in ["z"]:
+                z_curves.append(curve)
 
-            if "dff_fit" in self.dff[ch]:
-                dff_fit_label = (
-                    r"$$(\Delta F/F)_{"
-                    + ch
-                    + r"}-(\\Delta F/F)_{"
-                    + references[ch]
-                    + r"}$$"
-                )
-                relative_curves.append(
-                    hv.Curve(
-                        (self.dff.index.to_numpy(), self.dff[ch, "dff_fit"]),
-                        kdims=["Time"],
-                        vdims=["dff_fit"],
-                        group="dff_fit",
-                        label=dff_fit_label,
-                    )
-                )
-                channel_opts.append(
-                    opts.Curve(
-                        "dff_fit." + dff_fit_label,
-                        color=sig_color,
-                    )
-                )
-            z_curves.append(
-                hv.Curve(
-                    (self.dff.index.to_numpy(), self.dff[ch, "z"]),
-                    kdims=["Time"],
-                    vdims=["zdff"],
-                    group="zdff",
-                    label=ch,
-                )
-            )
-            channel_opts.append(
-                opts.Curve(
-                    "zdff." + ch,
-                    color=sig_color,
-                )
-            )
         iom = interval_overlay_map(raw_curves[0], self.intervals, self.update_intervals)
         plots = [(hv.Overlay(raw_curves) * iom).opts(xaxis=None)]
+        if len(df_curves) > 0:
+            plots.append(hv.Overlay(df_curves).opts(xaxis=None))
         if len(dff_curves) > 0:
             plots.append(hv.Overlay(dff_curves).opts(xaxis=None))
         if len(relative_curves) > 0:
             plots.append(hv.Overlay(relative_curves).opts(xaxis=None))
         plots.append(hv.Overlay(z_curves))
         plot = hv.Layout(plots).opts(
-            channel_opts
-            + [
-                opts.Curve(
-                    alpha=0.8,
-                    responsive=True,
-                    min_width=600,
-                    min_height=300,
-                    tools=tools,
-                ),
-                opts.Curve(
-                    "signal",
-                    line_dash="solid",
-                ),
-                opts.Curve(
-                    "isosbestic",
-                    line_dash="solid",
-                ),
-                opts.Curve(
-                    "ratio",
-                    line_dash="solid",
-                ),
-                opts.Curve(
-                    "control",
-                    line_dash="solid",
-                ),
-                opts.Curve(
-                    "dff",
-                    line_dash="solid",
-                    ylabel=r"$$\Delta F/F$$",
-                ),
-                opts.Curve(
-                    "rawfit",
-                    line_dash="dotted",
-                ),
-                opts.Curve(
-                    "flp",
-                    line_dash="dotted",
-                ),
-                opts.Curve(
-                    "fhp",
-                    line_dash="dotted",
-                    ylabel=r"$$\Delta F$$",
-                ),
-                opts.Curve(
-                    "control_fit",
-                    line_dash="dotted",
-                    ylabel=r"$$\Delta F/F$$",
-                ),
-                opts.Curve(
-                    "dff_fit",
-                    line_dash="solid",
-                    ylabel=r"$$\Delta F/F$$ (difference)",
-                ),
-                opts.Curve(
-                    "zdff",
-                    ylabel=r"$$\Delta F/F$$ (z-scored)",
-                ),
-            ]
+            opts.Curve(
+                alpha=0.8,
+                responsive=True,
+                min_width=600,
+                min_height=200,
+                tools=tools,
+            )
         )
-        # raw_plot = reduce(lambda a, b: a * b, [iso_shade, overlay] + sig_shades)
-        # raw_plot = raw_plot.opts(xaxis=None)
-        # plot = raw_plot + hv.Layout(dff_shades)
-        # plot = plot.opts(
-        #     opts.RGB(responsive=True, min_width=600, min_height=300, tools=tools)
-        # )
         return plot.cols(1)
 
     def view(self):
