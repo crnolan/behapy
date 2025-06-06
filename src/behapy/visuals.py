@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 from functools import partial, reduce
 from intervaltree import Interval
 import json
@@ -20,13 +21,113 @@ pn.extension("tabulator", "mathjax", loading_spinner="dots", comms="vscode")
 logger = logging.getLogger(__name__)
 
 
-def signal_curve(df, y_dim):
-    return hv.Curve((df.index.to_numpy(), df), "time", y_dim)
-    # return hv.Curve((pd.to_timedelta(df.index, unit='s'), df))
+def channel_color(channel_name: str, color: Union[str, None]) -> str:
+    if color is not None:
+        return color
+    if hasattr(channel_color, "colors"):
+        if channel_name in channel_color.colors:
+            color = channel_color.colors[channel_name]
+        else:
+            color = next(channel_color.color_iter)
+            channel_color.colors[channel_name] = color
+    else:
+        channel_color.colors = {}
+        channel_color.color_iter = iter(hv.Cycle("Colorblind").values)
+        color = next(channel_color.color_iter)
+        channel_color.colors[channel_name] = color
+    return color
 
 
-def signal_shade(df, y_dim, cmap):
-    return datashade(signal_curve(df, y_dim=y_dim), aggregator=ds.count(), cmap=cmap)
+def channel_curve(
+    channel: pd.Series,
+    ydim=None,
+    group=None,
+    label=None,
+    color=None,
+    line_dash=None,
+    ylabel=None,
+) -> hv.Curve:
+    """Create a holoviews Curve from a single channel of data.
+
+    Args:
+        channel (pd.Series): A pandas Series containing the channel
+        data. The name of the series should be a 2-tuple of the form
+        (channel_name, channel_type), with channel_type being one of the
+        raw channel types or outputs of the normalisation steps."""
+    if (
+        channel.name is None
+        or not isinstance(channel.name, tuple)
+        or not len(channel.name) == 2
+    ):
+        raise ValueError(
+            "Channel name must be a 2-tuple of the form (channel_name, channel_type)"
+        )
+    channel_name = channel.name[0]
+    channel_type = channel.name[1]
+    # x = pd.to_timedelta(channel.index, unit="s")
+    x = channel.index.to_numpy()
+    color = channel_color(channel_name, color)
+    if line_dash is None:
+        line_dash = "dotted" if channel_type in ["fit", "raw_fit", "flp", "fhp", "dff_fit"] else "solid"
+    kdims = ["Time (s)"]
+    group = channel_type if group is None else group
+    if channel_type in ["raw", "signal", "isosbestic", "control", "ratiometric"]:
+        ydim = "F" if ydim is None else ydim
+        ylabel = r"$$F$$" if ylabel is None else ylabel
+        label = f"{channel_name} ({channel_type})" if label is None else label
+    elif channel_type in ["raw_fit"]:
+        ydim = "F" if ydim is None else ydim
+        ylabel = r"$$F$$" if ylabel is None else ylabel
+        label = f"{channel_name} (exp fit)" if label is None else label
+    elif channel_type in ["flp"]:
+        ydim = "F" if ydim is None else ydim
+        ylabel = r"$$F$$" if ylabel is None else ylabel
+        label = f"{channel_name} (low-pass)" if label is None else label
+    elif channel_type in ["fhp"]:
+        ydim = "F" if ydim is None else ydim
+        ylabel = r"$$F$$" if ylabel is None else ylabel
+        label = f"{channel_name} (high-pass)" if label is None else label
+    elif channel_type in ["dff"]:
+        ydim = "dff" if ydim is None else ydim
+        ylabel = r"$$\Delta F/F$$" if ylabel is None else ylabel
+        label = f"{channel_name} (dF/F)" if label is None else label
+    elif channel_type in ["dff_fit"]:
+        ydim = "dff" if ydim is None else ydim
+        ylabel = r"$$\Delta F/F$$" if ylabel is None else ylabel
+        label = f"{channel_name} (best fit)" if label is None else label
+    elif channel_type in ["simultaneous_fit"]:
+        ydim = "F" if ydim is None else ydim
+        ylabel = r"$$F$$" if ylabel is None else ylabel
+        label = f"{channel_name} (best fit)" if label is None else label
+    elif channel_type in ["dff_diff"]:
+        ydim = "dff_diff" if ydim is None else ydim
+        ylabel = r"$$\Delta({\Delta F}/F)$$" if ylabel is None else ylabel
+        label = f"{channel_name} (residual)" if label is None else label
+    elif channel_type in ["zdff"]:
+        ydim = "zdff" if ydim is None else ydim
+        ylabel = r"z" if ylabel is None else ylabel
+    else:
+        raise ValueError(
+            f"Unknown channel type {channel_type} for channel {channel_name}."
+        )
+    # return ((channel_name, channel_type, ydim), hv.Curve(
+    #     (x, channel.to_numpy()),
+    #     kdims=kdims,
+    #     vdims=[ydim],
+    #     group=group,
+    #     label=label,
+    # ).opts(color=color, line_dash=line_dash, ylabel=ylabel))
+    return hv.Curve(
+        (x, channel.to_numpy()),
+        kdims=kdims,
+        vdims=[ydim],
+        group=group,
+        label=label,
+    ).opts(color=color, line_dash=line_dash, ylabel=ylabel)
+
+
+# def signal_shade(df, y_dim, cmap):
+#     return datashade(signal_curve(df, y_dim=y_dim), aggregator=ds.count(), cmap=cmap)
 
 
 def interval_overlay(intervals, selected=[]):
@@ -347,7 +448,13 @@ class PreprocessDashboard(param.Parameterized):
                 )
 
             if "dff_fit" in self.dff[ch]:
-                dff_fit_label = r"$$(\Delta F/F)_{" + ch + r"}-(\\Delta F/F)_{" + references[ch] + r"}$$"
+                dff_fit_label = (
+                    r"$$(\Delta F/F)_{"
+                    + ch
+                    + r"}-(\\Delta F/F)_{"
+                    + references[ch]
+                    + r"}$$"
+                )
                 relative_curves.append(
                     hv.Curve(
                         (self.dff.index.to_numpy(), self.dff[ch, "dff_fit"]),
