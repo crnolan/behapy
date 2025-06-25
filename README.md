@@ -11,24 +11,37 @@ conda activate behapy
 pip install -e .
 ```
 
-## Examples
-
-There is a MedPC event reading example in the examples subfolder. This example by default assumes MedPC data files are in the same folder as the notebook file.
-
-
 ## Preprocessing
 
-Convert TDT source data to BIDS-like raw data format:
+To use behapy, the TDT proprietary formatted source data needs to first be converted BIDS-like raw data format. This assumes session_map.csv is in the sourcedata_root folder:
 
 `tdt2bids [session_fn] [experiment_fn] [bidsroot]`
 
-Open the preprocessing dashboard and confirm rejected regions of the recording:
+Alternatively, you can specify the source data directory with --sourcedata_root. (Note that this path is relative to session_fn and not the current directory.):
+
+`tdt2bids [--sourcedata_root sourcedata_root] [session_fn] [experiment_fn] [bidsroot]`
+
+This will output raw data files in 
+`[bidsroot]/rawdata`
+
+Next open the preprocessing dashboard and identify regions of the recording for exclusion from analysis:
 
 `ppd [bidsroot]`
 
-Write the preprocessed data to the `derivatives/preprocess` tree:
+The preprocessing dashboard will open in a browser window. Select a recording by index to pull up an interactive bokeh plot of raw fluorescence and normalised fluorescence. Then use the box-select tool to exclude time points from analysis.
+
+![example interactive dashboard](data/behapy-ppd.png)
+
+Finally, write the preprocessed data to the `[bidsroot]/derivatives/preprocess` tree:
 
 `preprocess [bidsroot]`
+
+## Demo Notebooks
+
+A sample annotated analysis pipeline is available in `examples/analyse.ipynb`
+
+There is a MedPC event reading example in `examples/showevents.ipynb`
+
 
 ## Contributors
 
